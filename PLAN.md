@@ -35,6 +35,7 @@ WatsApp is a React Native mobile app for UWaterloo students to connect and chat 
 - [ ] Research Quest schedule format for parsing
 - [ ] Determine data privacy requirements (FIPPA compliance)
 - [ ] Plan email verification flow
+- [ ] Integrate UWaterloo class schedule (https://classes.uwaterloo.ca/uwpcshtm.html) for searchable course list
 
 ---
 
