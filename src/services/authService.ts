@@ -1,27 +1,161 @@
-import { supabase } from "../lib/supabase";
+import { supabase, clearSupabaseSession } from "../lib/supabase";
 import { makeRedirectUri } from "expo-auth-session";
 
+const WATERLOO_EMAIL_DOMAIN = "uwaterloo.ca";
+const WATIAM_REGEX = /^[a-z][a-z0-9]{2,15}$/;
+const PROFILE_AVATAR_BUCKET = "profile-photos";
+
+type AvatarUploadSource = {
+  uri: string;
+  base64?: string | null;
+  mimeType?: string | null;
+  fileName?: string | null;
+  type?: string | null;
+};
+
+type SupabaseOtpResponse = Awaited<
+  ReturnType<typeof supabase.auth.signInWithOtp>
+>;
+
+type VerifiedOtpResponse = Awaited<
+  ReturnType<typeof supabase.auth.verifyOtp>
+>;
+
+const normalizeWatIamId = (value: string) => value.trim().toLowerCase();
+
+const resolveWatIamId = (value: string) => {
+  const normalized = normalizeWatIamId(value);
+
+  if (!normalized) {
+    throw new Error("Please enter your WatIAM ID.");
+  }
+
+  if (!WATIAM_REGEX.test(normalized)) {
+    throw new Error(
+      "Enter a valid WatIAM ID using letters and numbers only."
+    );
+  }
+
+  return normalized;
+};
+
+const buildWaterlooEmail = (watiamId: string) =>
+  `${watiamId}@${WATERLOO_EMAIL_DOMAIN}`;
+
+const extractFileExtension = (
+  uri: string,
+  mimeType?: string | null,
+  fileName?: string | null
+) => {
+  const parseExt = (value?: string | null) => {
+    if (!value) return undefined;
+    const sanitized = value.split(/[?#]/)[0];
+    const dotIndex = sanitized.lastIndexOf(".");
+    if (dotIndex === -1) return undefined;
+    return sanitized.substring(dotIndex + 1);
+  };
+
+  const fromName = parseExt(fileName);
+  if (fromName) return fromName.toLowerCase();
+
+  const fromUri = parseExt(uri);
+  if (fromUri) return fromUri.toLowerCase();
+
+  if (mimeType && mimeType.includes("/")) {
+    const mimeExt = mimeType.split("/").pop();
+    if (mimeExt) return mimeExt.toLowerCase();
+  }
+
+  return "jpg";
+};
+
+const loadBlobFromUri = async (
+  uri: string,
+  mimeTypeHint?: string | null,
+  fileName?: string | null
+) => {
+  const response = await fetch(uri);
+
+  if (!response.ok) {
+    throw new Error("Unable to read the selected file.");
+  }
+
+  const blob = await response.blob();
+  const mimeType = blob.type || mimeTypeHint || "image/jpeg";
+  const fileExt = extractFileExtension(uri, mimeType, fileName);
+
+  return { blob, mimeType, fileExt } as const;
+};
+
+const resolveMimeType = (source: AvatarUploadSource) => {
+  if (source.mimeType) return source.mimeType;
+  if (source.type === "image") return "image/jpeg";
+  return "application/octet-stream";
+};
+
+const createUploadPayload = async (source: AvatarUploadSource) => {
+  const mimeType = resolveMimeType(source);
+
+  if (source.base64) {
+    const base64Payload = source.base64.replace(/\s/g, "");
+    const dataUri = `data:${mimeType};base64,${base64Payload}`;
+    const response = await fetch(dataUri);
+
+    if (!response.ok) {
+      throw new Error("Unable to process the selected image.");
+    }
+
+    const blob = await response.blob();
+    const fileExt = extractFileExtension(source.uri, mimeType, source.fileName ?? undefined);
+    return { blob, mimeType, fileExt } as const;
+  }
+
+  return loadBlobFromUri(source.uri, mimeType, source.fileName ?? undefined);
+};
+
 export const authService = {
-  // Send magic link to email (passwordless sign in/up)
-  sendMagicLink: async (watiamId: string, name?: string) => {
-    const email = `${watiamId}@uwaterloo.ca`;
+  // Send magic link/OTP to Waterloo email (passwordless sign in/up)
+  sendMagicLink: async (
+    rawWatIamId: string,
+    name?: string
+  ): Promise<{
+    data: SupabaseOtpResponse["data"];
+    email: string;
+    watiamId: string;
+  }> => {
+    const watiamId = resolveWatIamId(rawWatIamId);
+    const email = buildWaterlooEmail(watiamId);
     const redirectTo = makeRedirectUri();
+    const trimmedName = name?.trim();
+
+    const metadata = {
+      watiam_id: watiamId,
+      ...(trimmedName ? { name: trimmedName } : {}),
+    };
 
     const { data, error } = await supabase.auth.signInWithOtp({
       email,
       options: {
         emailRedirectTo: redirectTo,
         shouldCreateUser: true,
-        data: name ? { name, watiam_id: watiamId } : undefined,
+        data: metadata,
       },
     });
 
     if (error) throw error;
-    return data;
+    return { data, email, watiamId };
   },
 
   // Verify OTP code (alternative to magic link)
-  verifyOTP: async (email: string, token: string) => {
+  verifyOTP: async (
+    rawWatIamId: string,
+    token: string
+  ): Promise<
+    VerifiedOtpResponse["data"] & { email: string; watiamId: string }
+  > => {
+    const watiamId = resolveWatIamId(rawWatIamId);
+    const email = buildWaterlooEmail(watiamId);
+
     const { data, error } = await supabase.auth.verifyOtp({
       email,
       token,
@@ -29,12 +163,46 @@ export const authService = {
     });
 
     if (error) throw error;
-    return data;
+    return { ...data, email, watiamId };
   },
 
-  // Sign out
+  // Sign out and clear cached session
   signOut: async () => {
-    return await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut({ scope: "global" });
+    if (error) throw error;
+    await clearSupabaseSession();
+  },
+
+  updateAvatar: async (userId: string, source: AvatarUploadSource) => {
+    const { blob, mimeType, fileExt } = await createUploadPayload(source);
+    const objectPath = `${userId}/avatar.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(PROFILE_AVATAR_BUCKET)
+      .upload(objectPath, blob, {
+        cacheControl: "3600",
+        upsert: true,
+        contentType: mimeType,
+      });
+
+    if (uploadError) throw uploadError;
+
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from(PROFILE_AVATAR_BUCKET).getPublicUrl(objectPath);
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .update({
+        avatar_url: publicUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", userId)
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
   },
 
   // Get current session
@@ -57,10 +225,13 @@ export const authService = {
   // Create or update profile after first sign in
   upsertProfile: async (
     userId: string,
-    watiamId: string,
-    email: string,
+    rawWatIamId: string,
     name: string
   ) => {
+    const watiamId = resolveWatIamId(rawWatIamId);
+    const email = buildWaterlooEmail(watiamId);
+    const trimmedName = name.trim();
+
     const { data, error } = await supabase
       .from("profiles")
       .upsert(
@@ -68,7 +239,7 @@ export const authService = {
           id: userId,
           watiam_id: watiamId,
           email,
-          name,
+          name: trimmedName || name,
           updated_at: new Date().toISOString(),
         },
         { onConflict: "id" }
@@ -95,4 +266,14 @@ export const authService = {
     if (error) throw error;
     return data;
   },
+
+  deleteAccount: async () => {
+    const { error } = await supabase.rpc("delete_current_user");
+    if (error) throw error;
+  },
+};
+
+export const waterlooAuthUtils = {
+  buildWaterlooEmail,
+  normalizeWatIamId,
 };

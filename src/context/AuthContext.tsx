@@ -7,6 +7,7 @@ interface Profile {
   watiam_id: string;
   email: string;
   name: string;
+  avatar_url?: string;
   program?: string;
   year?: string;
   created_at: string;
