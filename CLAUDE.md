@@ -15,6 +15,7 @@ This is an **early-stage project** with planning documents only. No code has bee
 ## Architecture (Planned)
 
 ### Tech Stack
+
 - **Frontend**: React Native (iOS + Android)
 - **Backend**: Supabase (PostgreSQL + Realtime + Auth)
 - **Authentication**: Email-based (restricted to @uwaterloo.ca emails)
@@ -24,16 +25,19 @@ This is an **early-stage project** with planning documents only. No code has bee
 ### Key Components (To Be Built)
 
 1. **Authentication System**
+
    - Email verification flow using Supabase Auth
    - WatIAM ID input (appends @uwaterloo.ca automatically)
    - Email domain restriction enforced at database level
 
 2. **Course Management**
+
    - Course parsing from Quest schedule text (regex: `/[A-Z]{2,4}\s*\d{3}[A-Z]?/gi`)
    - Course enrollment tracking in junction table
    - Automatic chat room creation per course
 
 3. **Real-Time Chat**
+
    - Supabase Realtime subscriptions for live messaging
    - Course-based chat rooms (primary feature)
    - Direct messaging between students
@@ -45,12 +49,17 @@ This is an **early-stage project** with planning documents only. No code has bee
 
 ### Database Schema
 
+The schema can be found in ./src/docs/schema.sql
+
 Tables: `profiles`, `courses`, `user_courses`, `course_chats`, `messages`, `direct_messages`
 
 All tables use Row Level Security (RLS) policies to ensure:
+
 - Students can only access chats for courses they're enrolled in
 - Direct messages are private between sender/receiver
 - Email addresses must be @uwaterloo.ca
+
+I encourage you to add migrations in ./src/docs
 
 ## Development Commands
 
