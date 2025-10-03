@@ -11,8 +11,12 @@ import {
   Alert,
 } from "react-native";
 import { router } from "expo-router";
-import { authService } from "@/services/authService";
+import { authService, waterlooAuthUtils } from "@/services/authService";
 import { useAuth } from "@/context/AuthContext";
+
+const sanitizeOtpInput = (value: string) => value.replace(/[^0-9]/g, "");
+const sanitizeWatIamInput = (value: string) =>
+  value.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 
 export default function LoginScreen() {
   const [watiamId, setWatiamId] = useState("");
@@ -20,6 +24,9 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [otpCode, setOtpCode] = useState("");
+  const [verificationEmail, setVerificationEmail] = useState<string | null>(
+    null
+  );
   const { user } = useAuth();
 
   // Redirect if already logged in
@@ -35,22 +42,26 @@ export default function LoginScreen() {
       return;
     }
 
-    if (!name) {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
       Alert.alert("Error", "Please enter your name");
       return;
     }
 
     setLoading(true);
     try {
-      await authService.sendMagicLink(watiamId, name);
+      const response = await authService.sendMagicLink(watiamId, trimmedName);
+      setWatiamId(response.watiamId);
+      setName(trimmedName);
+      setVerificationEmail(response.email);
       setEmailSent(true);
       Alert.alert(
         "Check your email!",
-        `We sent a login code to ${watiamId}@uwaterloo.ca. Enter the 6-digit code below.`,
+        `We sent a login code to ${response.email}. Enter the 6-digit code below.`,
         [{ text: "OK" }]
       );
     } catch (error: any) {
-      Alert.alert("Error", error.message);
+      Alert.alert("Error", error.message || "Unable to send verification email.");
     } finally {
       setLoading(false);
     }
@@ -64,12 +75,14 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const email = `${watiamId}@uwaterloo.ca`;
-      const { session, user: authUser } = await authService.verifyOTP(email, otpCode);
+      const { user: authUser, email, watiamId: normalizedId } =
+        await authService.verifyOTP(watiamId, otpCode);
 
       if (authUser) {
-        // Create/update profile
-        await authService.upsertProfile(authUser.id, watiamId, email, name);
+        const currentName = name.trim();
+        await authService.upsertProfile(authUser.id, normalizedId, currentName);
+        setVerificationEmail(email);
+        setWatiamId(normalizedId);
         router.replace("/(tabs)");
       }
     } catch (error: any) {
@@ -78,6 +91,10 @@ export default function LoginScreen() {
       setLoading(false);
     }
   };
+
+  const displayedEmail =
+    verificationEmail ||
+    (watiamId ? waterlooAuthUtils.buildWaterlooEmail(watiamId) : "");
 
   return (
     <KeyboardAvoidingView
@@ -107,7 +124,7 @@ export default function LoginScreen() {
                   style={[styles.input, styles.watiamInput]}
                   placeholder="WatIAM ID (e.g., j23smith)"
                   value={watiamId}
-                  onChangeText={setWatiamId}
+                  onChangeText={(value) => setWatiamId(sanitizeWatIamInput(value))}
                   autoCapitalize="none"
                   autoCorrect={false}
                   editable={!loading}
@@ -128,21 +145,22 @@ export default function LoginScreen() {
               </TouchableOpacity>
 
               <Text style={styles.infoText}>
-                No password needed! We'll send a code to your email.
+                We&apos;ll email a code to your Waterloo account. Only @uwaterloo.ca
+                emails can sign in.
               </Text>
             </>
           ) : (
             <>
               <Text style={styles.codeTitle}>Enter your 6-digit code</Text>
               <Text style={styles.codeSubtitle}>
-                Sent to {watiamId}@uwaterloo.ca
+                Sent to {displayedEmail || "your Waterloo email"}
               </Text>
 
               <TextInput
                 style={[styles.input, styles.codeInput]}
                 placeholder="000000"
                 value={otpCode}
-                onChangeText={setOtpCode}
+                onChangeText={(value) => setOtpCode(sanitizeOtpInput(value))}
                 keyboardType="number-pad"
                 maxLength={6}
                 editable={!loading}
@@ -165,9 +183,10 @@ export default function LoginScreen() {
                 onPress={() => {
                   setEmailSent(false);
                   setOtpCode("");
+                  setVerificationEmail(null);
                 }}
               >
-                <Text style={styles.toggleText}>Use a different email</Text>
+                <Text style={styles.toggleText}>Use a different WatIAM ID</Text>
               </TouchableOpacity>
             </>
           )}
@@ -241,17 +260,19 @@ const styles = StyleSheet.create({
     color: "#666",
   },
   button: {
-    backgroundColor: "#000",
+    backgroundColor: "#11181C",
     borderRadius: 10,
     padding: 15,
     alignItems: "center",
     marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#11181C",
   },
   buttonDisabled: {
     opacity: 0.6,
   },
   buttonText: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontSize: 18,
     fontWeight: "bold",
   },
