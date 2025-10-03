@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -32,6 +33,7 @@ export default function ProfileScreen() {
   const { profile, user, refreshProfile, loading } = useAuth();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const colorScheme = useColorScheme();
   const theme = Colors[colorScheme ?? 'light'];
   const isDark = colorScheme === 'dark';
@@ -132,9 +134,28 @@ export default function ProfileScreen() {
     );
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshProfile();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}> 
-      <ScrollView contentContainerStyle={styles.container}>
+    <View style={[styles.screen, { backgroundColor: theme.background }]}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={isDark ? '#FFFFFF' : '#3B82F6'}
+            colors={['#3B82F6']}
+          />
+        }
+      >
         <View
           style={[
             styles.card,

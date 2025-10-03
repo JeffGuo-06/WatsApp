@@ -191,10 +191,13 @@ export const authService = {
       data: { publicUrl },
     } = supabase.storage.from(PROFILE_AVATAR_BUCKET).getPublicUrl(objectPath);
 
+    // Add cache-busting timestamp to URL
+    const cacheBustedUrl = `${publicUrl}?t=${Date.now()}`;
+
     const { data, error } = await supabase
       .from("profiles")
       .update({
-        avatar_url: publicUrl,
+        avatar_url: cacheBustedUrl,
         updated_at: new Date().toISOString(),
       })
       .eq("id", userId)
