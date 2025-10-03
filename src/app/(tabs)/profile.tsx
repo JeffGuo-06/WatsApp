@@ -1,29 +1,33 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
-} from 'react-native';
-import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
+} from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
 
-import { useAuth } from '@/context/AuthContext';
-import { authService } from '@/services/authService';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuth } from "@/context/AuthContext";
+import { authService } from "@/services/authService";
+import { Colors } from "@/constants/theme";
+import { useColorScheme } from "@/hooks/use-color-scheme";
+import Snackbar from "@/components/Snackbar";
 
 const AVATAR_SIZE = 120;
 
 const getInitials = (name?: string) => {
-  if (!name) return '?';
+  if (!name) return "?";
   const parts = name.trim().split(/\s+/);
-  const [first = '', second = ''] = parts;
+  const [first = "", second = ""] = parts;
   const initials = `${first.charAt(0)}${second.charAt(0)}`.trim();
   return initials.toUpperCase() || name.charAt(0).toUpperCase();
 };
@@ -32,12 +36,28 @@ export default function ProfileScreen() {
   const { profile, user, refreshProfile, loading } = useAuth();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState("");
+  const [snackbar, setSnackbar] = useState<{
+    visible: boolean;
+    message: string;
+    type: "success" | "error" | "info";
+  }>({ visible: false, message: "", type: "info" });
   const colorScheme = useColorScheme();
-  const theme = Colors[colorScheme ?? 'light'];
-  const isDark = colorScheme === 'dark';
-  const cardBackground = isDark ? '#1F1F1F' : '#0F1F3A';
-  const surfaceText = '#FFFFFF';
-  const subtleText = isDark ? '#9BA1A6' : '#C9D6EB';
+  const theme = Colors[colorScheme ?? "light"];
+  const isDark = colorScheme === "dark";
+  const cardBackground = isDark ? "#1F1F1F" : "#0F1F3A";
+  const surfaceText = "#FFFFFF";
+  const subtleText = isDark ? "#9BA1A6" : "#C9D6EB";
+
+  const showSnackbar = (message: string, type: "success" | "error" | "info" = "info") => {
+    setSnackbar({ visible: true, message, type });
+  };
+
+  const hideSnackbar = () => {
+    setSnackbar({ ...snackbar, visible: false });
+  };
 
   const avatarSource = useMemo(() => {
     if (profile?.avatar_url) {
@@ -52,10 +72,7 @@ export default function ProfileScreen() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      Alert.alert(
-        'Permission required',
-        'Please allow photo library access to set a profile picture.'
-      );
+      showSnackbar("Please allow photo library access to set a profile picture.", "error");
       return;
     }
 
@@ -83,11 +100,11 @@ export default function ProfileScreen() {
         type: asset.type ?? null,
       });
       await refreshProfile();
-      Alert.alert('Success', 'Profile picture updated.');
+      showSnackbar("Profile picture updated", "success");
     } catch (error: any) {
-      Alert.alert(
-        'Upload failed',
-        error?.message || 'Could not update your profile picture. Please try again.'
+      showSnackbar(
+        error?.message || "Could not update your profile picture",
+        "error"
       );
     } finally {
       setUploadingAvatar(false);
@@ -97,31 +114,31 @@ export default function ProfileScreen() {
   const handleLogout = async () => {
     try {
       await authService.signOut();
-      router.replace('/(auth)/login');
+      router.replace("/(auth)/login");
     } catch (error: any) {
-      Alert.alert('Error', error?.message || 'Unable to sign out right now.');
+      showSnackbar(error?.message || "Unable to sign out right now", "error");
     }
   };
 
   const handleDeleteAccount = () => {
     Alert.alert(
-      'Delete account?',
-      'This will permanently remove your account, courses, and messages. This action cannot be undone.',
+      "Delete account?",
+      "This will permanently remove your account, courses, and messages. This action cannot be undone.",
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: "Cancel", style: "cancel" },
         {
-          text: 'Delete',
-          style: 'destructive',
+          text: "Delete",
+          style: "destructive",
           onPress: async () => {
             if (!user) return;
             try {
               setDeletingAccount(true);
               await authService.deleteAccount();
-              router.replace('/(auth)/login');
+              router.replace("/(auth)/login");
             } catch (error: any) {
-              Alert.alert(
-                'Delete failed',
-                error?.message || 'Unable to delete your account. Please try again.'
+              showSnackbar(
+                error?.message || "Unable to delete your account",
+                "error"
               );
             } finally {
               setDeletingAccount(false);
@@ -132,122 +149,196 @@ export default function ProfileScreen() {
     );
   };
 
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshProfile();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const handleEditName = () => {
+    setNameValue(profile?.name || "");
+    setEditingName(true);
+  };
+
+  const handleSaveName = async () => {
+    if (!user || !nameValue.trim()) {
+      setEditingName(false);
+      return;
+    }
+
+    try {
+      await authService.updateProfile(user.id, { name: nameValue.trim() });
+      await refreshProfile();
+      setEditingName(false);
+      showSnackbar("Name updated", "success");
+    } catch (error: any) {
+      showSnackbar(
+        error?.message || "Could not update your name",
+        "error"
+      );
+    }
+  };
+
+  const handleCancelEditName = () => {
+    setEditingName(false);
+    setNameValue("");
+  };
+
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}> 
-      <ScrollView contentContainerStyle={styles.container}>
+    <SafeAreaView
+      style={[styles.screen, { backgroundColor: theme.background }]}
+      edges={["top"]}
+    >
+      <ScrollView
+        contentContainerStyle={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={isDark ? "#FFFFFF" : "#3B82F6"}
+            colors={["#3B82F6"]}
+          />
+        }
+      >
         <View
           style={[
             styles.card,
             {
               backgroundColor: cardBackground,
-              borderColor: isDark ? '#2B2B2B' : '#1B2C47',
+              borderColor: isDark ? "#2B2B2B" : "#1B2C47",
             },
           ]}
         >
-        <View style={styles.avatarContainer}>
-          {avatarSource ? (
-            <Image source={avatarSource} style={styles.avatar} contentFit="cover" />
-          ) : (
-            <View
-              style={[
-                styles.avatar,
-                styles.avatarFallback,
-                colorScheme === 'dark' && styles.avatarFallbackDark,
-              ]}
+          <View style={styles.avatarContainer}>
+            <TouchableOpacity
+              onPress={handleSelectAvatar}
+              disabled={uploadingAvatar || !user}
+              activeOpacity={0.7}
             >
-              <Text
-                style={[styles.avatarInitials, colorScheme === 'dark' && styles.avatarInitialsDark]}
-              >
-                {getInitials(profile?.name)}
-              </Text>
-            </View>
-          )}
-          <TouchableOpacity
-            style={[
-              styles.button,
-              styles.secondaryButton,
-              {
-                borderColor: isDark ? '#334155' : '#3B5B91',
-                backgroundColor: isDark ? '#2A323E' : '#132B4A',
-              },
-            ]}
-            onPress={handleSelectAvatar}
-            disabled={uploadingAvatar || !user}
-          >
-            {uploadingAvatar ? (
-              <ActivityIndicator color={colorScheme === 'dark' ? '#ECEDEE' : '#000'} />
-            ) : (
-              <Text
-                style={[styles.secondaryButtonText, { color: surfaceText }]}
-              >
-                Change photo
-              </Text>
-            )}
-          </TouchableOpacity>
-        </View>
+              {avatarSource ? (
+                <Image
+                  source={avatarSource}
+                  style={styles.avatar}
+                  contentFit="cover"
+                />
+              ) : (
+                <View
+                  style={[
+                    styles.avatar,
+                    styles.avatarFallback,
+                    colorScheme === "dark" && styles.avatarFallbackDark,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.avatarInitials,
+                      colorScheme === "dark" && styles.avatarInitialsDark,
+                    ]}
+                  >
+                    {getInitials(profile?.name)}
+                  </Text>
+                </View>
+              )}
+              {uploadingAvatar && (
+                <View style={styles.avatarOverlay}>
+                  <ActivityIndicator color="#FFFFFF" size="large" />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
 
-        <View style={styles.infoSection}>
-          <Text style={[styles.heading, { color: surfaceText }]}>Profile</Text>
-          {loading && !profile ? (
-            <ActivityIndicator />
-          ) : (
-            <>
-              <InfoRow
-                label="Name"
-                value={profile?.name || 'Unknown'}
-                labelColor={subtleText}
-                valueColor={surfaceText}
-              />
-              <InfoRow
-                label="Waterloo Email"
-                value={profile?.email || 'N/A'}
-                labelColor={subtleText}
-                valueColor={surfaceText}
-              />
-              <InfoRow
-                label="WatIAM ID"
-                value={profile?.watiam_id || 'N/A'}
-                labelColor={subtleText}
-                valueColor={surfaceText}
-              />
-              <InfoRow
-                label="Program"
-                value={profile?.program || 'Add your program'}
-                labelColor={subtleText}
-                valueColor={surfaceText}
-              />
-              <InfoRow
-                label="Year"
-                value={profile?.year || 'Add your year'}
-                labelColor={subtleText}
-                valueColor={surfaceText}
-              />
-            </>
-          )}
-        </View>
-
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: '#3B82F6' }]}
-            onPress={handleLogout}
-          >
-            <Text style={styles.primaryButtonText}>Sign out</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.button, styles.dangerButton, deletingAccount && styles.buttonDisabled]}
-            onPress={handleDeleteAccount}
-            disabled={deletingAccount}
-          >
-            {deletingAccount ? (
-              <ActivityIndicator color="#fff" />
+          <View style={styles.infoSection}>
+            {loading && !profile ? (
+              <ActivityIndicator />
             ) : (
-              <Text style={styles.dangerButtonText}>Delete account</Text>
+              <>
+                {editingName ? (
+                  <View style={styles.infoRow}>
+                    <Text style={[styles.infoLabel, { color: subtleText }]}>Name</Text>
+                    <TextInput
+                      style={[styles.nameInput, { color: surfaceText }]}
+                      value={nameValue}
+                      onChangeText={setNameValue}
+                      placeholder="Enter your name"
+                      placeholderTextColor={subtleText}
+                      autoFocus
+                      onSubmitEditing={handleSaveName}
+                      onBlur={handleCancelEditName}
+                    />
+                  </View>
+                ) : (
+                  <TouchableOpacity onPress={handleEditName}>
+                    <InfoRow
+                      label="Name"
+                      value={profile?.name || "Unknown"}
+                      labelColor={subtleText}
+                      valueColor={surfaceText}
+                    />
+                  </TouchableOpacity>
+                )}
+                <InfoRow
+                  label="Waterloo Email"
+                  value={profile?.email || "N/A"}
+                  labelColor={subtleText}
+                  valueColor={surfaceText}
+                />
+                <InfoRow
+                  label="WatIAM ID"
+                  value={profile?.watiam_id || "N/A"}
+                  labelColor={subtleText}
+                  valueColor={surfaceText}
+                />
+                <InfoRow
+                  label="Program"
+                  value={profile?.program || "Add your program"}
+                  labelColor={subtleText}
+                  valueColor={surfaceText}
+                />
+                <InfoRow
+                  label="Year"
+                  value={profile?.year || "Add your year"}
+                  labelColor={subtleText}
+                  valueColor={surfaceText}
+                />
+              </>
             )}
-          </TouchableOpacity>
-        </View>
+          </View>
+
+          <View style={styles.actions}>
+            <TouchableOpacity
+              style={[styles.button, styles.outlineButton]}
+              onPress={handleLogout}
+            >
+              <Text style={[styles.outlineButtonText, { color: surfaceText }]}>Sign out</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.button,
+                styles.dangerButton,
+                deletingAccount && styles.buttonDisabled,
+              ]}
+              onPress={handleDeleteAccount}
+              disabled={deletingAccount}
+            >
+              {deletingAccount ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.primaryButtonText}>Delete account</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
-    </View>
+      <Snackbar
+        visible={snackbar.visible}
+        message={snackbar.message}
+        type={snackbar.type}
+        onDismiss={hideSnackbar}
+      />
+    </SafeAreaView>
   );
 }
 
@@ -280,11 +371,11 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.select({ ios: 48, default: 32 }),
   },
   card: {
-    backgroundColor: '#fff',
+    backgroundColor: "#fff",
     borderRadius: 16,
     padding: 24,
     gap: 32,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -293,44 +384,50 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   avatarContainer: {
-    alignItems: 'center',
+    alignItems: "center",
     gap: 16,
   },
   avatar: {
     width: AVATAR_SIZE,
     height: AVATAR_SIZE,
     borderRadius: AVATAR_SIZE / 2,
-    backgroundColor: '#E5E5E5',
-    overflow: 'hidden',
+    backgroundColor: "#E5E5E5",
+    overflow: "hidden",
+  },
+  avatarOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    borderRadius: AVATAR_SIZE / 2,
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarFallbackDark: {
-    backgroundColor: '#3A3A3A',
+    backgroundColor: "#3A3A3A",
   },
   avatarInitials: {
     fontSize: 36,
-    fontWeight: '700',
-    color: '#555',
+    fontWeight: "700",
+    color: "#555",
   },
   avatarInitialsDark: {
-    color: '#ECEDEE',
-  },
-  heading: {
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 8,
+    color: "#ECEDEE",
   },
   infoSection: {
     gap: 12,
     paddingBottom: 8,
   },
   infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingVertical: 6,
   },
   infoLabel: {
@@ -338,44 +435,45 @@ const styles = StyleSheet.create({
   },
   infoValue: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   actions: {
     gap: 12,
-    marginTop: 'auto',
+    marginTop: "auto",
   },
   button: {
     height: 48,
     borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   primaryButton: {
     backgroundColor: Colors.light.tint,
   },
   primaryButtonText: {
-    color: '#fff',
+    color: "#fff",
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
   },
-  secondaryButton: {
-    borderWidth: 1,
-    paddingHorizontal: 24,
+  outlineButton: {
+    backgroundColor: "transparent",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
   },
-  secondaryButtonText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#FFFFFF',
+  outlineButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
   },
   dangerButton: {
-    backgroundColor: '#E5484D',
-  },
-  dangerButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    backgroundColor: "#E5484D",
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  nameInput: {
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "right",
+    flex: 1,
   },
 });

@@ -1,0 +1,100 @@
+[
+  {
+    "table_name": "course_chats",
+    "policy_name": "Users can create course chats",
+    "operation": "INSERT",
+    "using_expr": null,
+    "with_check_expr": "true"
+  },
+  {
+    "table_name": "course_chats",
+    "policy_name": "Users can view course chats",
+    "operation": "SELECT",
+    "using_expr": "true",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "courses",
+    "policy_name": "Anyone can insert courses",
+    "operation": "INSERT",
+    "using_expr": null,
+    "with_check_expr": "true"
+  },
+  {
+    "table_name": "courses",
+    "policy_name": "Anyone can view courses",
+    "operation": "SELECT",
+    "using_expr": "true",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "direct_messages",
+    "policy_name": "Users can send DMs",
+    "operation": "INSERT",
+    "using_expr": null,
+    "with_check_expr": "(sender_id = auth.uid())"
+  },
+  {
+    "table_name": "direct_messages",
+    "policy_name": "Users can update their received DMs",
+    "operation": "UPDATE",
+    "using_expr": "(receiver_id = auth.uid())",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "direct_messages",
+    "policy_name": "Users can view their own DMs",
+    "operation": "SELECT",
+    "using_expr": "((sender_id = auth.uid()) OR (receiver_id = auth.uid()))",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "messages",
+    "policy_name": "Users can send messages to their courses",
+    "operation": "INSERT",
+    "using_expr": null,
+    "with_check_expr": "((course_chat_id IN ( SELECT cc.id\n   FROM (course_chats cc\n     JOIN user_courses uc ON ((uc.course_id = cc.course_id)))\n  WHERE (uc.user_id = auth.uid()))) AND (user_id = auth.uid()))"
+  },
+  {
+    "table_name": "messages",
+    "policy_name": "Users can view messages in their courses",
+    "operation": "SELECT",
+    "using_expr": "(course_chat_id IN ( SELECT cc.id\n   FROM (course_chats cc\n     JOIN user_courses uc ON ((uc.course_id = cc.course_id)))\n  WHERE (uc.user_id = auth.uid())))",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "profiles",
+    "policy_name": "Users can insert own profile",
+    "operation": "INSERT",
+    "using_expr": null,
+    "with_check_expr": "(auth.uid() = id)"
+  },
+  {
+    "table_name": "profiles",
+    "policy_name": "Users can update own profile",
+    "operation": "UPDATE",
+    "using_expr": "(auth.uid() = id)",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "profiles",
+    "policy_name": "Users can view all profiles",
+    "operation": "SELECT",
+    "using_expr": "true",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "user_courses",
+    "policy_name": "Users can manage own courses",
+    "operation": "ALL",
+    "using_expr": "(auth.uid() = user_id)",
+    "with_check_expr": null
+  },
+  {
+    "table_name": "user_courses",
+    "policy_name": "Users can view all user_courses",
+    "operation": "SELECT",
+    "using_expr": "true",
+    "with_check_expr": null
+  }
+]

@@ -74,17 +74,17 @@ const loadBlobFromUri = async (
   mimeTypeHint?: string | null,
   fileName?: string | null
 ) => {
-  const response = await fetch(uri);
+  const mimeType = mimeTypeHint || "image/jpeg";
+  const fileExt = extractFileExtension(uri, mimeType, fileName);
 
+  // Read file as base64 and convert to ArrayBuffer for Supabase upload
+  const response = await fetch(uri);
   if (!response.ok) {
     throw new Error("Unable to read the selected file.");
   }
 
-  const blob = await response.blob();
-  const mimeType = blob.type || mimeTypeHint || "image/jpeg";
-  const fileExt = extractFileExtension(uri, mimeType, fileName);
-
-  return { blob, mimeType, fileExt } as const;
+  const arrayBuffer = await response.arrayBuffer();
+  return { data: arrayBuffer, mimeType, fileExt } as const;
 };
 
 const resolveMimeType = (source: AvatarUploadSource) => {
@@ -105,9 +105,9 @@ const createUploadPayload = async (source: AvatarUploadSource) => {
       throw new Error("Unable to process the selected image.");
     }
 
-    const blob = await response.blob();
+    const arrayBuffer = await response.arrayBuffer();
     const fileExt = extractFileExtension(source.uri, mimeType, source.fileName ?? undefined);
-    return { blob, mimeType, fileExt } as const;
+    return { data: arrayBuffer, mimeType, fileExt } as const;
   }
 
   return loadBlobFromUri(source.uri, mimeType, source.fileName ?? undefined);
@@ -174,12 +174,12 @@ export const authService = {
   },
 
   updateAvatar: async (userId: string, source: AvatarUploadSource) => {
-    const { blob, mimeType, fileExt } = await createUploadPayload(source);
+    const { data: fileData, mimeType, fileExt } = await createUploadPayload(source);
     const objectPath = `${userId}/avatar.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
       .from(PROFILE_AVATAR_BUCKET)
-      .upload(objectPath, blob, {
+      .upload(objectPath, fileData, {
         cacheControl: "3600",
         upsert: true,
         contentType: mimeType,
@@ -191,10 +191,13 @@ export const authService = {
       data: { publicUrl },
     } = supabase.storage.from(PROFILE_AVATAR_BUCKET).getPublicUrl(objectPath);
 
+    // Add cache-busting timestamp to URL
+    const cacheBustedUrl = `${publicUrl}?t=${Date.now()}`;
+
     const { data, error } = await supabase
       .from("profiles")
       .update({
-        avatar_url: publicUrl,
+        avatar_url: cacheBustedUrl,
         updated_at: new Date().toISOString(),
       })
       .eq("id", userId)
