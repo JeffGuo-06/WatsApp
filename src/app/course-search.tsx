@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -20,19 +20,17 @@ interface Course {
 
 export default function CourseSearch() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [courses, setCourses] = useState<Course[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [allCourses, setAllCourses] = useState<Course[]>([]);
+  const [filteredCourses, setFilteredCourses] = useState<Course[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const searchCourses = async (query: string) => {
-    if (query.length < 2) {
-      setCourses([]);
-      return;
-    }
+  useEffect(() => {
+    fetchCourses();
+  }, []);
 
+  const fetchCourses = async () => {
     setLoading(true);
     try {
-      // TODO: Replace with your Vercel deployment URL after deployment
-      // For now, you can test locally with: vercel dev
       const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
       const response = await fetch(`${API_URL}/api/courses`);
 
@@ -46,19 +44,10 @@ export default function CourseSearch() {
         throw new Error("Invalid response format");
       }
 
-      const searchLower = query.toLowerCase();
-      const filteredCourses = data.courses
-        .filter((course: Course) => {
-          const courseCode = `${course.subject} ${course.catalog}`.toLowerCase();
-          const courseTitle = course.title.toLowerCase();
-          return courseCode.includes(searchLower) || courseTitle.includes(searchLower);
-        })
-        .slice(0, 50); // Limit to 50 results
-
-      setCourses(filteredCourses);
+      setAllCourses(data.courses);
     } catch (error) {
       console.error("Error fetching courses:", error);
-      setCourses([]);
+      setAllCourses([]);
     } finally {
       setLoading(false);
     }
@@ -66,7 +55,49 @@ export default function CourseSearch() {
 
   const handleSearchChange = (text: string) => {
     setSearchQuery(text);
-    searchCourses(text);
+
+    if (text.length < 2) {
+      setFilteredCourses([]);
+      return;
+    }
+
+    // Remove whitespace and convert to lowercase for comparison
+    const searchNormalized = text.replace(/\s+/g, '').toLowerCase();
+
+    const results = allCourses
+      .map((course) => {
+        const courseCode = `${course.subject}${course.catalog}`.toLowerCase();
+        const courseCodeWithSpace = `${course.subject} ${course.catalog}`.toLowerCase();
+        const courseTitle = course.title.toLowerCase();
+
+        // Prioritize course code matches
+        let priority = 0;
+        if (courseCode.startsWith(searchNormalized)) {
+          priority = 3; // Exact start match
+        } else if (courseCode.includes(searchNormalized)) {
+          priority = 2; // Course code contains search
+        } else if (courseCodeWithSpace.includes(text.toLowerCase())) {
+          priority = 2; // Course code with space matches
+        } else if (courseTitle.includes(text.toLowerCase())) {
+          priority = 1; // Title contains search
+        }
+
+        return { course, priority };
+      })
+      .filter((item) => item.priority > 0)
+      .sort((a, b) => {
+        if (b.priority !== a.priority) {
+          return b.priority - a.priority;
+        }
+        // If same priority, sort alphabetically by course code
+        return `${a.course.subject}${a.course.catalog}`.localeCompare(
+          `${b.course.subject}${b.course.catalog}`
+        );
+      })
+      .slice(0, 50)
+      .map((item) => item.course);
+
+    setFilteredCourses(results);
   };
 
   const handleCourseSelect = (course: Course) => {
@@ -102,7 +133,7 @@ export default function CourseSearch() {
         </View>
       ) : (
         <FlatList
-          data={courses}
+          data={filteredCourses}
           keyExtractor={(item, index) => `${item.subject}-${item.catalog}-${index}`}
           renderItem={({ item }) => (
             <TouchableOpacity
