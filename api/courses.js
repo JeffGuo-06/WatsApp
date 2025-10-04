@@ -55,7 +55,7 @@ export default async function handler(req, res) {
         const campus = cells[4][1].trim().replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&');
 
         // Validate that this looks like a course (subject is 2-6 uppercase letters, catalog is digits)
-        if (/^[A-Z]{2,6}$/.test(subject) && /^\d{2,4}[A-Z]?$/.test(catalog) && title.length > 0) {
+        if (/^[A-Z]{2,6}$/.test(subject) && /^\d{1,4}[A-Z]?$/.test(catalog) && title.length > 0) {
           validCourses++;
 
           if (validCourses <= 10) {
