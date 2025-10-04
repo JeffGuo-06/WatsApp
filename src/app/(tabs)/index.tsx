@@ -48,7 +48,7 @@ export default function HomeScreen() {
           <Text style={styles.emptyText}>No courses added yet</Text>
           <TouchableOpacity
             style={styles.addButton}
-            onPress={() => router.push("/(tabs)/explore")}
+            onPress={() => router.push("/course-search")}
           >
             <Text style={styles.addButtonText}>Add Courses</Text>
           </TouchableOpacity>
