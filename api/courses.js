@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch('https://classes.uwaterloo.ca/uwpcshtm.html');
+    const response = await fetch('https://web.archive.org/web/20250821132601/https://classes.uwaterloo.ca/uwpcshtm.html');
 
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
