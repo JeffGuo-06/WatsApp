@@ -16,6 +16,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { supabase } from "@/lib/supabase";
 import { chatService } from "@/services/chatService";
 import { RealtimeChannel } from "@supabase/supabase-js";
+import Snackbar from "@/components/Snackbar";
 
 interface Message {
   id: string;
@@ -39,6 +40,7 @@ export default function CourseChat() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(showJoinPrompt === "true");
   const [joining, setJoining] = useState(false);
+  const [snackbar, setSnackbar] = useState({ visible: false, message: "", type: "success" as "success" | "error" | "info" });
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -105,8 +107,12 @@ export default function CourseChat() {
       // Reload messages now that user is enrolled
       const initialMessages = await chatService.getCourseMessages(courseChatId as string);
       setMessages(initialMessages);
+
+      // Show success snackbar
+      setSnackbar({ visible: true, message: `Joined ${courseCode}!`, type: "success" });
     } catch (error) {
       console.error("Error joining course:", error);
+      setSnackbar({ visible: true, message: "Failed to join course", type: "error" });
     } finally {
       setJoining(false);
     }
@@ -299,6 +305,13 @@ export default function CourseChat() {
           )}
         </TouchableOpacity>
       </View>
+
+      <Snackbar
+        visible={snackbar.visible}
+        message={snackbar.message}
+        type={snackbar.type}
+        onDismiss={() => setSnackbar({ ...snackbar, visible: false })}
+      />
     </KeyboardAvoidingView>
   );
 }

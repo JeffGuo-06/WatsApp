@@ -12,6 +12,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { supabase } from "@/lib/supabase";
 import { courseService } from "@/services/courseService";
+import Snackbar from "@/components/Snackbar";
 
 interface CourseMember {
   id: string;
@@ -29,6 +30,7 @@ export default function CourseDetails() {
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [userCourseId, setUserCourseId] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState({ visible: false, message: "", type: "success" as "success" | "error" | "info" });
 
   useEffect(() => {
     loadMembers();
@@ -75,11 +77,18 @@ export default function CourseDetails() {
             try {
               if (!userCourseId) return;
               await courseService.removeCourse(userCourseId);
-              router.dismiss();
-              router.dismiss(); // Dismiss course-details and course-chat
+
+              // Show snackbar before dismissing
+              setSnackbar({ visible: true, message: `Left ${courseCode}`, type: "info" });
+
+              // Wait a bit for snackbar to show, then dismiss
+              setTimeout(() => {
+                router.dismiss();
+                router.dismiss(); // Dismiss course-details and course-chat
+              }, 1500);
             } catch (error) {
               console.error("Error leaving course:", error);
-              Alert.alert("Error", "Failed to leave course");
+              setSnackbar({ visible: true, message: "Failed to leave course", type: "error" });
             }
           },
         },
@@ -135,6 +144,13 @@ export default function CourseDetails() {
           <Text style={styles.leaveButtonText}>Leave Course</Text>
         </TouchableOpacity>
       </View>
+
+      <Snackbar
+        visible={snackbar.visible}
+        message={snackbar.message}
+        type={snackbar.type}
+        onDismiss={() => setSnackbar({ ...snackbar, visible: false })}
+      />
     </View>
   );
 }

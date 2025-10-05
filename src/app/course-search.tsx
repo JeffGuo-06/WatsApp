@@ -12,6 +12,7 @@ import { router } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { supabase } from "@/lib/supabase";
 import { courseService } from "@/services/courseService";
+import Snackbar from "@/components/Snackbar";
 
 interface Course {
   subject: string;
