@@ -1,6 +1,6 @@
 {
   "installCommand": "cd src && npm install",
-  "buildCommand": "cd src && npx expo export:web",
+  "buildCommand": "cd src && npx expo export -p web",
   "outputDirectory": "src/dist",
   "functions": {
     "api/courses.js": {
