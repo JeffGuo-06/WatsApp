@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd src && npx expo export --platform web",
+  "buildCommand": "cd src && npx expo export:web",
   "outputDirectory": "src/dist",
   "functions": {
     "api/courses.js": {
