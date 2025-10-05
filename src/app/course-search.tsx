@@ -10,6 +10,8 @@ import {
 } from "react-native";
 import { router } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { supabase } from "@/lib/supabase";
+import { courseService } from "@/services/courseService";
 
 interface Course {
   subject: string;
@@ -100,11 +102,63 @@ export default function CourseSearch() {
     setFilteredCourses(results);
   };
 
-  const handleCourseSelect = (course: Course) => {
-    // TODO: Add course to user's courses
-    console.log("Selected course:", course);
-    router.back();
+  const handleCourseSelect = async (course: Course) => {
+    try {
+      const courseCode = `${course.subject} ${course.catalog}`;
+      const term = "Winter 2025";
+
+      // 1. Create or get course (WITHOUT enrolling user yet)
+      const { data: existingCourse } = await supabase
+        .from("courses")
+        .select("id")
+        .eq("course_code", courseCode)
+        .eq("term", term)
+        .single();
+
+      let createdCourseId: string;
+
+      if (existingCourse) {
+        createdCourseId = existingCourse.id;
+      } else {
+        // Create new course
+        const { data: newCourse, error: createError } = await supabase
+          .from("courses")
+          .insert({
+            course_code: courseCode,
+            course_name: course.title,
+            term,
+          })
+          .select("id")
+          .single();
+
+        if (createError) throw createError;
+        createdCourseId = newCourse.id;
+      }
+
+      // 2. Get or create course chat
+      const { data: createdChatId, error: chatError } = await supabase.rpc(
+        "get_or_create_course_chat",
+        { p_course_id: createdCourseId }
+      );
+
+      if (chatError) throw chatError;
+
+      // 3. Navigate to chat room with showJoinPrompt flag
+      router.push({
+        pathname: "/course-chat",
+        params: {
+          courseChatId: createdChatId,
+          courseCode: `${course.subject} ${course.catalog}`,
+          courseTitle: course.title,
+          courseId: createdCourseId,
+          showJoinPrompt: "true"
+        }
+      });
+    } catch (error) {
+      console.error("Error preparing chat:", error);
+    }
   };
+
 
   return (
     <View style={styles.container}>
@@ -261,6 +315,83 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 16,
     color: "#999",
+    textAlign: "center",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modalContent: {
+    backgroundColor: "#fff",
+    borderRadius: 20,
+    padding: 30,
+    width: "85%",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: "#000",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  coursePreview: {
+    backgroundColor: "#f5f5f5",
+    padding: 20,
+    borderRadius: 12,
+    marginBottom: 25,
+  },
+  modalCourseCode: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: "#000",
+    marginBottom: 8,
+  },
+  modalCourseTitle: {
+    fontSize: 16,
+    color: "#666",
+    marginBottom: 8,
+  },
+  modalCampus: {
+    fontSize: 14,
+    color: "#999",
+  },
+  modalButtons: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 15,
+    borderRadius: 10,
+    alignItems: "center",
+  },
+  cancelButton: {
+    backgroundColor: "#e0e0e0",
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#666",
+  },
+  joinButton: {
+    backgroundColor: "#FDB515",
+  },
+  joinButtonText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#000",
+  },
+  preparingText: {
+    fontSize: 16,
+    color: "#666",
+    marginTop: 15,
     textAlign: "center",
   },
 });
