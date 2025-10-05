@@ -1,4 +1,6 @@
 {
+  "buildCommand": "cd src && npx expo export --platform web",
+  "outputDirectory": "src/dist",
   "functions": {
     "api/courses.js": {
       "memory": 1024,
