@@ -1,5 +1,13 @@
 import { supabase } from "../lib/supabase";
 
+interface Course {
+  subject: string;
+  catalog: string;
+  title: string;
+  campus: string;
+  topic?: string | null;
+}
+
 export const courseService = {
   // Parse course codes from text (Quest schedule paste)
   parseCourses: (text: string): string[] => {
@@ -10,6 +18,63 @@ export const courseService = {
         matches.map((c) => c.replace(/\s+/g, " ").toUpperCase().trim())
       ),
     ];
+  },
+
+  // Join a course and create/join its chat
+  joinCourse: async (userId: string, course: Course) => {
+    const courseCode = `${course.subject} ${course.catalog}`;
+    const term = "Winter 2025";
+
+    // 1. Create or get course
+    const { data: existingCourse, error: fetchError } = await supabase
+      .from("courses")
+      .select("id")
+      .eq("course_code", courseCode)
+      .eq("term", term)
+      .single();
+
+    let courseId: string;
+
+    if (existingCourse) {
+      courseId = existingCourse.id;
+    } else {
+      // Create new course
+      const { data: newCourse, error: createError } = await supabase
+        .from("courses")
+        .insert({
+          course_code: courseCode,
+          course_name: course.title,
+          term,
+        })
+        .select("id")
+        .single();
+
+      if (createError) throw createError;
+      courseId = newCourse.id;
+    }
+
+    // 2. Get or create course chat using the helper function
+    const { data: chatId, error: chatError } = await supabase.rpc(
+      "get_or_create_course_chat",
+      { p_course_id: courseId }
+    );
+
+    if (chatError) throw chatError;
+
+    // 3. Enroll user in course
+    const { error: enrollError } = await supabase
+      .from("user_courses")
+      .insert({
+        user_id: userId,
+        course_id: courseId,
+      });
+
+    // Ignore duplicate enrollment errors
+    if (enrollError && !enrollError.message.includes("duplicate")) {
+      throw enrollError;
+    }
+
+    return { courseId, chatId };
   },
 
   // Add courses for user
