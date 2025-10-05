@@ -51,7 +51,10 @@ export default function ProfileScreen() {
   const surfaceText = "#FFFFFF";
   const subtleText = isDark ? "#9BA1A6" : "#C9D6EB";
 
-  const showSnackbar = (message: string, type: "success" | "error" | "info" = "info") => {
+  const showSnackbar = (
+    message: string,
+    type: "success" | "error" | "info" = "info"
+  ) => {
     setSnackbar({ visible: true, message, type });
   };
 
@@ -72,7 +75,10 @@ export default function ProfileScreen() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
     if (!permission.granted) {
-      showSnackbar("Please allow photo library access to set a profile picture.", "error");
+      showSnackbar(
+        "Please allow photo library access to set a profile picture.",
+        "error"
+      );
       return;
     }
 
@@ -175,10 +181,7 @@ export default function ProfileScreen() {
       setEditingName(false);
       showSnackbar("Name updated", "success");
     } catch (error: any) {
-      showSnackbar(
-        error?.message || "Could not update your name",
-        "error"
-      );
+      showSnackbar(error?.message || "Could not update your name", "error");
     }
   };
 
@@ -257,7 +260,9 @@ export default function ProfileScreen() {
               <>
                 {editingName ? (
                   <View style={styles.infoRow}>
-                    <Text style={[styles.infoLabel, { color: subtleText }]}>Name</Text>
+                    <Text style={[styles.infoLabel, { color: subtleText }]}>
+                      Name
+                    </Text>
                     <TextInput
                       style={[styles.nameInput, { color: surfaceText }]}
                       value={nameValue}
@@ -312,7 +317,9 @@ export default function ProfileScreen() {
               style={[styles.button, styles.outlineButton]}
               onPress={handleLogout}
             >
-              <Text style={[styles.outlineButtonText, { color: surfaceText }]}>Sign out</Text>
+              <Text style={[styles.outlineButtonText, { color: surfaceText }]}>
+                Sign out
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
