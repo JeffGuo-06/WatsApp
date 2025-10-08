@@ -34,7 +34,14 @@ export default function CourseSearch() {
   const fetchCourses = async () => {
     setLoading(true);
     try {
-      const API_URL = process.env.EXPO_PUBLIC_API_URL || "http://localhost:3000";
+      // For web: use relative URL. For native: use full URL
+      const isWeb = typeof window !== 'undefined';
+      const isDev = isWeb && window.location.hostname === 'localhost';
+      const API_URL = isDev
+        ? "http://localhost:3000"
+        : isWeb
+          ? "" // Relative URL for web production
+          : "https://wats-app.vercel.app"; // Full URL for native
       const response = await fetch(`${API_URL}/api/courses`);
 
       if (!response.ok) {
