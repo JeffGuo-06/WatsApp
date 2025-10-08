@@ -1,5 +1,5 @@
-const fs = require('fs');
-const path = require('path');
+// Import the JSON directly - Vercel bundles this correctly
+const coursesData = require('./data/courses.json');
 
 module.exports = async function handler(req, res) {
   // Enable CORS
@@ -17,11 +17,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // Read courses data from file
-    const dataPath = path.join(__dirname, 'data', 'courses.json');
-    const fileContents = fs.readFileSync(dataPath, 'utf8');
-    const coursesData = JSON.parse(fileContents);
-
     res.status(200).json(coursesData);
   } catch (error) {
     console.error('Error serving courses:', error);
