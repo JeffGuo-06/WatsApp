@@ -44,11 +44,19 @@ https.get(ARCHIVE_URL, (res) => {
       sourceUrl: ARCHIVE_URL
     };
 
-    const outputPath = path.join(__dirname, 'data', 'courses.json');
-    fs.writeFileSync(outputPath, JSON.stringify(data, null, 2));
+    const jsonString = JSON.stringify(data, null, 2);
+
+    // Save to api/data/ for Vercel serverless function
+    const apiPath = path.join(__dirname, 'data', 'courses.json');
+    fs.writeFileSync(apiPath, jsonString);
+
+    // Save to src/data/ for local development imports
+    const srcPath = path.join(__dirname, '..', 'src', 'data', 'courses.json');
+    fs.writeFileSync(srcPath, jsonString);
 
     console.log(`✓ Successfully parsed ${courses.length} courses`);
-    console.log(`✓ Saved to ${outputPath}`);
+    console.log(`✓ Saved to ${apiPath}`);
+    console.log(`✓ Saved to ${srcPath}`);
   });
 }).on('error', (e) => {
   console.error('Error fetching courses:', e);

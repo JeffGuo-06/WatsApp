@@ -34,27 +34,32 @@ export default function CourseSearch() {
   const fetchCourses = async () => {
     setLoading(true);
     try {
-      // For web: use relative URL. For native: use full URL
-      const isWeb = typeof window !== 'undefined';
-      const isDev = isWeb && window.location.hostname === 'localhost';
-      const API_URL = isDev
-        ? "http://localhost:3000"
-        : isWeb
-          ? "" // Relative URL for web production
-          : "https://wats-app.vercel.app"; // Full URL for native
-      const response = await fetch(`${API_URL}/api/courses`);
+      // Check if running in development
+      const isDev = __DEV__ || (typeof window !== 'undefined' && window.location.hostname === 'localhost');
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (isDev) {
+        // In development, import JSON directly (no API server needed)
+        const coursesModule = await import('@/data/courses.json');
+        const data = coursesModule.default || coursesModule;
+        setAllCourses(data.courses);
+      } else {
+        // In production, fetch from API
+        const isWeb = typeof window !== 'undefined';
+        const API_URL = isWeb ? "" : "https://wats-app.vercel.app";
+        const response = await fetch(`${API_URL}/api/courses`);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        if (!data.courses) {
+          throw new Error("Invalid response format");
+        }
+
+        setAllCourses(data.courses);
       }
-
-      const data = await response.json();
-
-      if (!data.courses) {
-        throw new Error("Invalid response format");
-      }
-
-      setAllCourses(data.courses);
     } catch (error) {
       console.error("Error fetching courses:", error);
       setAllCourses([]);
