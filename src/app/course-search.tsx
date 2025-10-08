@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   View,
   Text,
@@ -7,12 +7,13 @@ import {
   FlatList,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from "react-native";
 import { router } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { supabase } from "@/lib/supabase";
-import { courseService } from "@/services/courseService";
-import Snackbar from "@/components/Snackbar";
+import Constants from "expo-constants";
+import localCoursesData from "@/data/courses.json";
 
 interface Course {
   subject: string;
@@ -27,41 +28,82 @@ export default function CourseSearch() {
   const [filteredCourses, setFilteredCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchCourses();
-  }, []);
-
-  const fetchCourses = async () => {
+  const fetchCourses = useCallback(async () => {
     setLoading(true);
     try {
-      // For web: use relative URL. For native: use full URL
-      const isWeb = typeof window !== 'undefined';
-      const isDev = isWeb && window.location.hostname === 'localhost';
-      const API_URL = isDev
-        ? "http://localhost:3000"
-        : isWeb
-          ? "" // Relative URL for web production
-          : "https://wats-app.vercel.app"; // Full URL for native
-      const response = await fetch(`${API_URL}/api/courses`);
+      const endpoints = new Set<string>();
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+      if (Platform.OS === "web" && typeof window !== "undefined") {
+        const { origin, hostname } = window.location;
+        endpoints.add(`${origin}/api/courses`);
+
+        if (hostname === "localhost" || hostname === "127.0.0.1") {
+          endpoints.add("http://localhost:3000/api/courses");
+        }
+      } else {
+        const hostUri = (
+          Constants.expoConfig?.hostUri ||
+          Constants.manifest2?.extra?.expoGo?.developer?.hostUri ||
+          Constants.manifest?.debuggerHost
+        );
+
+        if (hostUri) {
+          const host = hostUri.split(":")[0];
+          if (host) {
+            endpoints.add(`http://${host}:3000/api/courses`);
+          }
+        }
       }
 
-      const data = await response.json();
+      endpoints.add("https://wats-app.vercel.app/api/courses");
 
-      if (!data.courses) {
-        throw new Error("Invalid response format");
+      let courses: Course[] | null = null;
+      let lastError: unknown;
+
+      for (const endpoint of Array.from(endpoints)) {
+        try {
+          const response = await fetch(endpoint);
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+
+          if (!data?.courses) {
+            throw new Error("Invalid response format");
+          }
+
+          courses = data.courses;
+          break;
+        } catch (error) {
+          lastError = error;
+          console.warn(`Course fetch failed for ${endpoint}`, error);
+        }
       }
 
-      setAllCourses(data.courses);
+      if (!courses) {
+        if (localCoursesData?.courses?.length) {
+          console.warn("Falling back to bundled course data");
+          setAllCourses(localCoursesData.courses as Course[]);
+          return;
+        }
+
+        throw lastError || new Error("Unable to fetch courses");
+      }
+
+      setAllCourses(courses);
     } catch (error) {
       console.error("Error fetching courses:", error);
       setAllCourses([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchCourses();
+  }, [fetchCourses]);
 
   const handleSearchChange = (text: string) => {
     setSearchQuery(text);
