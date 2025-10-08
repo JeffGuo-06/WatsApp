@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -8,12 +8,16 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Platform,
+  Modal,
+  Alert,
 } from "react-native";
 import { router } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { supabase } from "@/lib/supabase";
 import Constants from "expo-constants";
 import localCoursesData from "@/data/courses.json";
+import { courseService } from "@/services/courseService";
+import { parseQuestSchedule } from "@/utils/questScheduleParser";
 
 interface Course {
   subject: string;
@@ -27,6 +31,19 @@ export default function CourseSearch() {
   const [allCourses, setAllCourses] = useState<Course[]>([]);
   const [filteredCourses, setFilteredCourses] = useState<Course[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadText, setUploadText] = useState("");
+  const [processingUpload, setProcessingUpload] = useState(false);
+  const [detectedCourses, setDetectedCourses] = useState<string[]>([]);
+  const [selectedCourses, setSelectedCourses] = useState<Set<string>>(new Set());
+  const knownCourseCodes = useMemo(() => {
+    if (!allCourses.length) return null;
+    const set = new Set<string>();
+    allCourses.forEach((course) => {
+      set.add(`${course.subject} ${course.catalog}`.toUpperCase());
+    });
+    return set;
+  }, [allCourses]);
 
   const fetchCourses = useCallback(async () => {
     setLoading(true);
@@ -211,6 +228,90 @@ export default function CourseSearch() {
     }
   };
 
+  const resetUploadState = () => {
+    setUploadText("");
+    setProcessingUpload(false);
+    setShowUploadModal(false);
+    setDetectedCourses([]);
+    setSelectedCourses(new Set());
+  };
+
+  useEffect(() => {
+    if (!showUploadModal) return;
+
+    const parsed = parseQuestSchedule(uploadText, {
+      knownCourses: knownCourseCodes,
+    });
+
+    setDetectedCourses(parsed);
+    setSelectedCourses(new Set(parsed));
+  }, [uploadText, showUploadModal, knownCourseCodes]);
+
+  const toggleSelectedCourse = (courseCode: string) => {
+    setSelectedCourses((prev) => {
+      const next = new Set(prev);
+      if (next.has(courseCode)) {
+        next.delete(courseCode);
+      } else {
+        next.add(courseCode);
+      }
+      return next;
+    });
+  };
+
+  const handleUploadCourses = async () => {
+    if (!uploadText.trim()) {
+      Alert.alert("Nothing to parse", "Paste your schedule text before uploading.");
+      return;
+    }
+
+    if (!detectedCourses.length) {
+      Alert.alert(
+        "No courses found",
+        "We couldn't detect any course codes in that text. Please check the paste and try again."
+      );
+      return;
+    }
+
+    const courseCodes = Array.from(selectedCourses).filter(Boolean);
+
+    if (!courseCodes.length) {
+      Alert.alert(
+        "Select a course",
+        "Choose at least one of the detected courses before uploading."
+      );
+      return;
+    }
+
+    setProcessingUpload(true);
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        Alert.alert("Not signed in", "You need to be logged in to upload your schedule.");
+        setProcessingUpload(false);
+        return;
+      }
+
+      await courseService.addCourses(user.id, courseCodes);
+
+      resetUploadState();
+      Alert.alert(
+        "Courses added",
+        `We matched ${courseCodes.length} course${courseCodes.length === 1 ? "" : "s"} from your schedule.`
+      );
+    } catch (error) {
+      console.error("Error processing schedule upload:", error);
+      Alert.alert(
+        "Upload failed",
+        "We couldn't add your courses right now. Please try again in a moment."
+      );
+      setProcessingUpload(false);
+    }
+  };
+
 
   return (
     <View style={styles.container}>
@@ -232,6 +333,14 @@ export default function CourseSearch() {
           autoCorrect={false}
         />
       </View>
+
+      <TouchableOpacity
+        style={styles.uploadButton}
+        onPress={() => setShowUploadModal(true)}
+      >
+        <IconSymbol name="tray.and.arrow.up" size={18} color="#000" />
+        <Text style={styles.uploadButtonText}>Upload Now</Text>
+      </TouchableOpacity>
 
       {loading ? (
         <View style={styles.loadingContainer}>
@@ -269,6 +378,84 @@ export default function CourseSearch() {
           }
         />
       )}
+
+      <Modal
+        animationType="fade"
+        transparent
+        visible={showUploadModal}
+        onRequestClose={() => {
+          if (!processingUpload) {
+            resetUploadState();
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Upload Schedule</Text>
+            <Text style={styles.modalInstructions}>
+              Paste your course schedule from Quest below. We&apos;ll match the course codes and add the classes for you.
+            </Text>
+            <TextInput
+              style={styles.uploadTextInput}
+              value={uploadText}
+              onChangeText={setUploadText}
+              placeholder="Paste your schedule text here..."
+              multiline
+              editable={!processingUpload}
+            />
+            {detectedCourses.length > 0 ? (
+              <View style={styles.detectedCoursesContainer}>
+                <Text style={styles.detectedCoursesTitle}>
+                  Detected courses ({detectedCourses.length})
+                </Text>
+                <View style={styles.courseChipWrap}>
+                  {detectedCourses.map((code) => {
+                    const isSelected = selectedCourses.has(code);
+                    return (
+                      <TouchableOpacity
+                        key={code}
+                        style={[styles.courseChip, isSelected && styles.courseChipSelected]}
+                        onPress={() => toggleSelectedCourse(code)}
+                        disabled={processingUpload}
+                      >
+                        <Text
+                          style={[styles.courseChipText, isSelected && styles.courseChipTextSelected]}
+                        >
+                          {code}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : (
+              !!uploadText.trim() && (
+                <Text style={styles.noCoursesFound}>No course codes detected yet.</Text>
+              )
+            )}
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.cancelButton]}
+                onPress={resetUploadState}
+                disabled={processingUpload}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.joinButton, processingUpload && styles.disabledButton]}
+                onPress={handleUploadCourses}
+                disabled={processingUpload}
+              >
+                {processingUpload ? (
+                  <ActivityIndicator color="#000" />
+                ) : (
+                  <Text style={styles.joinButtonText}>Add Courses</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -313,6 +500,22 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 15,
     fontSize: 16,
+    color: "#000",
+  },
+  uploadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FDB515",
+    marginHorizontal: 15,
+    marginBottom: 15,
+    paddingVertical: 12,
+    borderRadius: 10,
+  },
+  uploadButtonText: {
+    marginLeft: 8,
+    fontSize: 16,
+    fontWeight: "600",
     color: "#000",
   },
   loadingContainer: {
@@ -393,6 +596,60 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginBottom: 20,
   },
+  modalInstructions: {
+    fontSize: 14,
+    color: "#666",
+    marginBottom: 20,
+    textAlign: "center",
+  },
+  uploadTextInput: {
+    minHeight: 160,
+    maxHeight: 260,
+    backgroundColor: "#f5f5f5",
+    borderRadius: 12,
+    padding: 16,
+    textAlignVertical: "top",
+    fontSize: 14,
+    color: "#000",
+    marginBottom: 20,
+  },
+  detectedCoursesContainer: {
+    marginBottom: 20,
+  },
+  detectedCoursesTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#000",
+    marginBottom: 10,
+  },
+  courseChipWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  courseChip: {
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: "#e0e0e0",
+  },
+  courseChipSelected: {
+    backgroundColor: "#FDB515",
+  },
+  courseChipText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#444",
+  },
+  courseChipTextSelected: {
+    color: "#000",
+  },
+  noCoursesFound: {
+    fontSize: 13,
+    color: "#999",
+    textAlign: "center",
+    marginBottom: 20,
+  },
   coursePreview: {
     backgroundColor: "#f5f5f5",
     padding: 20,
@@ -439,6 +696,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     color: "#000",
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
   preparingText: {
     fontSize: 16,
