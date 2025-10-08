@@ -44,7 +44,7 @@ https.get(ARCHIVE_URL, (res) => {
       sourceUrl: ARCHIVE_URL
     };
 
-    const outputPath = path.join(__dirname, 'courses.json');
+    const outputPath = path.join(__dirname, 'data', 'courses.json');
     fs.writeFileSync(outputPath, JSON.stringify(data, null, 2));
 
     console.log(`✓ Successfully parsed ${courses.length} courses`);

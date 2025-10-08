@@ -10,7 +10,13 @@ WatsApp is a React Native mobile app for UWaterloo students to connect and chat 
 
 ## Current Status
 
-This is an **early-stage project** with planning documents only. No code has been written yet. The project is in Phase 1 (Setup & Planning).
+This project is **actively in development**. Core features implemented include:
+- ✅ Authentication (email verification with @uwaterloo.ca)
+- ✅ Course search and enrollment
+- ✅ Real-time course chat rooms
+- ✅ Profile management with avatar upload
+- 🚧 Direct messaging (planned)
+- 🚧 Classmate discovery (planned)
 
 ## Architecture (Planned)
 
