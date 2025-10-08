@@ -1,4 +1,5 @@
-const coursesData = require('./data/courses.json');
+const fs = require('fs');
+const path = require('path');
 
 module.exports = async function handler(req, res) {
   // Enable CORS
@@ -16,10 +17,17 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // Serve pre-parsed static course data
+    // Read courses data from file
+    const dataPath = path.join(__dirname, 'data', 'courses.json');
+    const fileContents = fs.readFileSync(dataPath, 'utf8');
+    const coursesData = JSON.parse(fileContents);
+
     res.status(200).json(coursesData);
   } catch (error) {
     console.error('Error serving courses:', error);
-    res.status(500).json({ error: error.message || 'Failed to serve courses' });
+    res.status(500).json({
+      error: error.message || 'Failed to serve courses',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 }
