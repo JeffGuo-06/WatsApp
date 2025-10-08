@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { supabase } from "@/lib/supabase";
 import { chatService } from "@/services/chatService";
-import { RealtimeChannel } from "@supabase/supabase-js";
+import { RealtimeChannel, RealtimePostgresInsertPayload } from "@supabase/supabase-js";
 import Snackbar from "@/components/Snackbar";
 
 interface Message {
@@ -45,18 +45,53 @@ export default function CourseChat() {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
-  useEffect(() => {
-    initializeChat();
+  const handleNewMessage = useCallback(
+    async (payload: RealtimePostgresInsertPayload<Message>) => {
+      const incoming = payload.new;
 
-    return () => {
-      // Cleanup subscription on unmount
-      if (channelRef.current) {
-        channelRef.current.unsubscribe();
+      setMessages((prev) => {
+        if (prev.some((message) => message.id === incoming.id)) {
+          return prev;
+        }
+        return [...prev, incoming];
+      });
+
+      // Scroll to bottom when new message arrives
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+
+      if (!incoming.profiles?.name) {
+        try {
+          const enriched = await chatService.getMessageWithProfile(incoming.id);
+          if (enriched) {
+            setMessages((prev) =>
+              prev.map((message) =>
+                message.id === incoming.id ? (enriched as Message) : message
+              )
+            );
+          }
+        } catch (error) {
+          console.error("Error loading message sender:", error);
+        }
       }
-    };
-  }, []);
+    },
+    []
+  );
 
-  const initializeChat = async () => {
+  const initializeChat = useCallback(async () => {
+    if (!courseChatId) {
+      setLoading(false);
+      return;
+    }
+
+    // ensure previous subscriptions are cleaned up before re-subscribing
+    if (channelRef.current) {
+      channelRef.current.unsubscribe();
+      channelRef.current = null;
+    }
+
+    setLoading(true);
     try {
       // Get current user
       const { data: { user } } = await supabase.auth.getUser();
@@ -67,7 +102,7 @@ export default function CourseChat() {
       try {
         const initialMessages = await chatService.getCourseMessages(courseChatId as string);
         setMessages(initialMessages);
-      } catch (err) {
+      } catch {
         // If RLS blocks access (not enrolled), messages will be empty
         console.log("Cannot load messages yet (not enrolled)");
       }
@@ -82,7 +117,19 @@ export default function CourseChat() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [courseChatId, handleNewMessage]);
+
+  useEffect(() => {
+    initializeChat();
+
+    return () => {
+      // Cleanup subscription on unmount
+      if (channelRef.current) {
+        channelRef.current.unsubscribe();
+        channelRef.current = null;
+      }
+    };
+  }, [initializeChat]);
 
   const handleConfirmJoin = async () => {
     if (!currentUserId || !courseId) return;
@@ -121,15 +168,6 @@ export default function CourseChat() {
   const handleCancelJoin = () => {
     setShowModal(false);
     router.back();
-  };
-
-  const handleNewMessage = (payload: any) => {
-    const newMsg = payload.new;
-    setMessages((prev) => [...prev, newMsg]);
-    // Scroll to bottom when new message arrives
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
   };
 
   const sendMessage = async () => {

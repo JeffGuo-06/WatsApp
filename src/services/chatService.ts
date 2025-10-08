@@ -1,5 +1,5 @@
 import { supabase } from "../lib/supabase";
-import { RealtimeChannel } from "@supabase/supabase-js";
+import { RealtimeChannel, RealtimePostgresInsertPayload } from "@supabase/supabase-js";
 
 export const chatService = {
   // Get course chat room
@@ -40,7 +40,18 @@ export const chatService = {
         user_id: userId,
         content,
       })
-      .select()
+      .select("*, profiles(name, watiam_id)")
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  getMessageWithProfile: async (messageId: string) => {
+    const { data, error } = await supabase
+      .from("messages")
+      .select("*, profiles(name, watiam_id)")
+      .eq("id", messageId)
       .single();
 
     if (error) throw error;
@@ -50,7 +61,7 @@ export const chatService = {
   // Subscribe to new messages in real-time
   subscribeToCourseMessages: (
     courseChatId: string,
-    callback: (payload: any) => void
+    callback: (payload: RealtimePostgresInsertPayload<any>) => void | Promise<void>
   ): RealtimeChannel => {
     return supabase
       .channel(`course-chat-${courseChatId}`)

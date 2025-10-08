@@ -41,11 +41,13 @@ export default function CourseSearch() {
           endpoints.add("http://localhost:3000/api/courses");
         }
       } else {
-        const hostUri = (
-          Constants.expoConfig?.hostUri ||
-          Constants.manifest2?.extra?.expoGo?.developer?.hostUri ||
-          Constants.manifest?.debuggerHost
-        );
+        const legacyDebuggerHost = (
+          Constants.manifest as Record<string, unknown> | undefined
+        )?.debuggerHost as string | undefined;
+        const hostUri =
+          Constants.expoConfig?.hostUri ??
+          Constants.manifest2?.extra?.expoGo?.developer?.hostUri ??
+          legacyDebuggerHost;
 
         if (hostUri) {
           const host = hostUri.split(":")[0];
