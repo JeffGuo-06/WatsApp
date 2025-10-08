@@ -3,7 +3,7 @@
   "buildCommand": "cd src && npx expo export -p web",
   "outputDirectory": "src/dist",
   "functions": {
-    "api/courses.cjs": {
+    "api/courses.js": {
       "memory": 1024,
       "maxDuration": 10
     }
