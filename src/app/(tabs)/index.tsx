@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, Alert } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator } from "react-native";
 import { useAuth } from "@/context/AuthContext";
 import { courseService } from "@/services/courseService";
 import { chatService } from "@/services/chatService";
@@ -24,6 +24,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     if (user) {
+      console.log("[Home] User detected, loading courses", { userId: user.id });
       loadCourses();
     }
   }, [user]);
@@ -39,7 +40,9 @@ export default function HomeScreen() {
 
   const loadCourses = async () => {
     try {
+      console.log("[Home] Fetching courses for user", { userId: user?.id });
       const data = await courseService.getUserCourses(user!.id);
+      console.log("[Home] Loaded courses", { count: data.length });
       setCourses(data);
     } catch (error) {
       console.error("Error loading courses:", error);
@@ -51,13 +54,19 @@ export default function HomeScreen() {
 
   const onRefresh = () => {
     setRefreshing(true);
+    console.log("[Home] Pull-to-refresh triggered");
     loadCourses();
   };
 
   const handleCoursePress = async (course: UserCourse) => {
     try {
+      console.log("[Home] Opening course chat", {
+        courseId: course.courses.id,
+        courseCode: course.courses.course_code,
+      });
       // Get the course chat
       const chatRoom = await chatService.getCourseChatRoom(course.courses.id);
+      console.log("[Home] Navigating to course chat", { chatId: chatRoom.id });
 
       router.push({
         pathname: "/course-chat",
@@ -85,7 +94,7 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>My Courses</Text>
-        <Text style={styles.subtitle}>Welcome, {profile?.name}!</Text>
+        <Text style={styles.subtitle}>WatsApp, {profile?.name}!</Text>
         <TouchableOpacity
           style={styles.addCourseButton}
           onPress={() => router.push("/course-search")}
