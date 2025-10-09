@@ -10,6 +10,8 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
+  Alert,
+  Linking,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -17,12 +19,19 @@ import { supabase } from "@/lib/supabase";
 import { chatService } from "@/services/chatService";
 import { RealtimeChannel, RealtimePostgresInsertPayload } from "@supabase/supabase-js";
 import Snackbar from "@/components/Snackbar";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 
 interface Message {
   id: string;
   content: string;
   user_id: string;
   created_at: string;
+  attachment_url?: string | null;
+  attachment_type?: string | null;
+  attachment_name?: string | null;
+  attachment_size?: number | null;
   profiles?: {
     name: string;
     watiam_id: string;
@@ -37,6 +46,7 @@ export default function CourseChat() {
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(showJoinPrompt === "true");
   const [joining, setJoining] = useState(false);
@@ -178,7 +188,7 @@ export default function CourseChat() {
       await chatService.sendCourseMessage(
         courseChatId as string,
         currentUserId,
-        newMessage.trim()
+        { content: newMessage.trim() }
       );
       setNewMessage("");
     } catch (error) {
@@ -188,9 +198,96 @@ export default function CourseChat() {
     }
   };
 
+  const handleOpenAttachment = (url: string) => {
+    Linking.openURL(url).catch((error) => {
+      console.error("Error opening attachment:", error);
+      Alert.alert("Unable to open", "We couldn't open that attachment. Try downloading it from a browser instead.");
+    });
+  };
+
+  const uploadAndSendAttachment = async (params: {
+    uri: string;
+    mimeType?: string | null;
+    name?: string | null;
+  }) => {
+    if (!currentUserId || !courseChatId) {
+      Alert.alert("Not ready", "We couldn't prepare the upload yet. Please try again.");
+      return;
+    }
+
+    setUploadingAttachment(true);
+    try {
+      const uploaded = await chatService.uploadChatAttachment({
+        userId: currentUserId,
+        courseChatId: courseChatId as string,
+        uri: params.uri,
+        mimeType: params.mimeType,
+        name: params.name,
+      });
+
+      await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
+        content: "",
+        attachmentUrl: uploaded.publicUrl,
+        attachmentType: uploaded.contentType,
+        attachmentName: uploaded.fileName,
+        attachmentSize: uploaded.size,
+      });
+    } catch (error) {
+      console.error("Error uploading attachment:", error);
+      Alert.alert("Upload failed", "We couldn't upload that file. Please try again.");
+    } finally {
+      setUploadingAttachment(false);
+    }
+  };
+
+  const handleAttachmentPress = async () => {
+    if (uploadingAttachment || sending) return;
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ["application/pdf", "image/*"],
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+
+    if (result.type === "cancel") {
+      return;
+    }
+
+    const asset = result.assets?.[0] ?? (result as unknown as { uri?: string; mimeType?: string | null; name?: string | null });
+
+    if (!asset || !asset.uri) {
+      Alert.alert("Selection failed", "We couldn't read that file. Please try again.");
+      return;
+    }
+
+    const inferredMime = asset.mimeType || (asset.name?.toLowerCase().endsWith(".pdf") ? "application/pdf" : undefined);
+    const mimeType = inferredMime || (asset.name?.match(/\.png$/i) ? "image/png" : "image/jpeg");
+    const name = asset.name || asset.uri.split("/").pop() || (mimeType === "application/pdf" ? "document.pdf" : "image.png");
+
+    if (mimeType !== "application/pdf" && !mimeType.startsWith("image/")) {
+      Alert.alert("Unsupported file", "Please choose a PNG image or a PDF document.");
+      return;
+    }
+
+    await uploadAndSendAttachment({
+      uri: asset.uri,
+      mimeType,
+      name,
+    });
+  };
+
+  const formatFileSize = (bytes?: number | null) => {
+    if (!bytes || Number.isNaN(bytes)) return null;
+    if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`;
+    if (bytes >= 1_000) return `${(bytes / 1_000).toFixed(1)} KB`;
+    return `${bytes} B`;
+  };
+
   const renderMessage = ({ item }: { item: Message }) => {
     const isOwnMessage = item.user_id === currentUserId;
     const senderName = item.profiles?.name || "Unknown";
+    const hasAttachment = Boolean(item.attachment_url);
+    const hasText = Boolean(item.content?.trim().length);
 
     return (
       <View
@@ -208,14 +305,54 @@ export default function CourseChat() {
             isOwnMessage ? styles.ownBubble : styles.otherBubble,
           ]}
         >
-          <Text
-            style={[
-              styles.messageText,
-              isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
-            ]}
-          >
-            {item.content}
-          </Text>
+          {hasAttachment && item.attachment_url ? (
+            item.attachment_type?.startsWith("image/") ? (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => handleOpenAttachment(item.attachment_url!)}
+              >
+                <Image
+                  source={{ uri: item.attachment_url }}
+                  style={[
+                    styles.attachmentImage,
+                    hasText ? styles.attachmentImageWithText : null,
+                  ]}
+                  contentFit="cover"
+                />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[
+                  styles.attachmentFile,
+                  hasText ? styles.attachmentFileWithText : null,
+                ]}
+                onPress={() => handleOpenAttachment(item.attachment_url!)}
+              >
+                <IconSymbol name="doc.richtext" size={22} color="#000" />
+                <View style={styles.attachmentMeta}>
+                  <Text style={styles.attachmentName} numberOfLines={1}>
+                    {item.attachment_name || "Attachment"}
+                  </Text>
+                  {item.attachment_size ? (
+                    <Text style={styles.attachmentSize}>
+                      {formatFileSize(item.attachment_size)}
+                    </Text>
+                  ) : null}
+                </View>
+              </TouchableOpacity>
+            )
+          ) : null}
+
+          {hasText ? (
+            <Text
+              style={[
+                styles.messageText,
+                isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
+              ]}
+            >
+              {item.content}
+            </Text>
+          ) : null}
         </View>
         <Text style={styles.timestamp}>
           {new Date(item.created_at).toLocaleTimeString([], {
@@ -323,6 +460,22 @@ export default function CourseChat() {
       </Modal>
 
       <View style={styles.inputContainer}>
+        <View style={styles.inputActions}>
+          <TouchableOpacity
+            style={[
+              styles.attachmentButton,
+              (uploadingAttachment || sending) && styles.attachmentButtonDisabled,
+            ]}
+            onPress={handleAttachmentPress}
+            disabled={uploadingAttachment || sending}
+          >
+            {uploadingAttachment ? (
+              <ActivityIndicator size="small" color="#000" />
+            ) : (
+              <IconSymbol name="paperclip" size={20} color="#000" />
+            )}
+          </TouchableOpacity>
+        </View>
         <TextInput
           style={styles.input}
           placeholder="Type a message..."
@@ -332,9 +485,12 @@ export default function CourseChat() {
           maxLength={1000}
         />
         <TouchableOpacity
-          style={[styles.sendButton, (!newMessage.trim() || sending) && styles.sendButtonDisabled]}
+          style={[
+            styles.sendButton,
+            (!newMessage.trim() || sending || uploadingAttachment) && styles.sendButtonDisabled,
+          ]}
           onPress={sendMessage}
-          disabled={!newMessage.trim() || sending}
+          disabled={!newMessage.trim() || sending || uploadingAttachment}
         >
           {sending ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -437,6 +593,40 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginHorizontal: 10,
   },
+  attachmentImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 12,
+    backgroundColor: "#ccc",
+  },
+  attachmentImageWithText: {
+    marginBottom: 10,
+  },
+  attachmentFile: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: "rgba(0, 0, 0, 0.05)",
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  attachmentFileWithText: {
+    marginBottom: 10,
+  },
+  attachmentMeta: {
+    flex: 1,
+  },
+  attachmentName: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#000",
+  },
+  attachmentSize: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 2,
+  },
   emptyState: {
     flex: 1,
     justifyContent: "center",
@@ -461,6 +651,12 @@ const styles = StyleSheet.create({
     borderTopColor: "#ddd",
     alignItems: "flex-end",
   },
+  inputActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginRight: 10,
+  },
   input: {
     flex: 1,
     backgroundColor: "#f5f5f5",
@@ -481,6 +677,19 @@ const styles = StyleSheet.create({
   },
   sendButtonDisabled: {
     backgroundColor: "#ccc",
+  },
+  attachmentButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#ddd",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#fff",
+  },
+  attachmentButtonDisabled: {
+    opacity: 0.5,
   },
   modalOverlay: {
     flex: 1,

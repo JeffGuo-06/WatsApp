@@ -298,9 +298,46 @@ export default function CourseSearch() {
       await courseService.addCourses(user.id, courseCodes);
 
       resetUploadState();
+      const anyRouter = router as typeof router & {
+        dismissTo?: (path: string) => void;
+        dismissAll?: () => void;
+      };
+
+      const navigateHome = () => {
+        if (typeof anyRouter.dismissTo === "function") {
+          console.log("[CourseSearch] Navigating after upload", { method: "dismissTo" });
+          anyRouter.dismissTo("/(tabs)");
+          return;
+        }
+
+        if (typeof router.dismiss === "function") {
+          console.log("[CourseSearch] Navigating after upload", { method: "dismiss" });
+          router.dismiss(1);
+          return;
+        }
+
+        if (typeof anyRouter.dismissAll === "function") {
+          console.log("[CourseSearch] Navigating after upload", { method: "dismissAll" });
+          anyRouter.dismissAll();
+          return;
+        }
+
+        console.log("[CourseSearch] Navigating after upload", { method: "back" });
+        router.back();
+      };
+
+      console.log("[CourseSearch] Schedule upload success", {
+        userId: user.id,
+        matchedCourses: courseCodes,
+      });
+
+      // Navigate immediately so the user lands back on the home tab without needing to dismiss the alert.
+      navigateHome();
+
       Alert.alert(
         "Courses added",
-        `We matched ${courseCodes.length} course${courseCodes.length === 1 ? "" : "s"} from your schedule.`
+        `We matched ${courseCodes.length} course${courseCodes.length === 1 ? "" : "s"} from your schedule.`,
+        [{ text: "OK" }]
       );
     } catch (error) {
       console.error("Error processing schedule upload:", error);

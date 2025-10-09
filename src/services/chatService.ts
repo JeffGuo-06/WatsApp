@@ -1,6 +1,67 @@
 import { supabase } from "../lib/supabase";
 import { RealtimeChannel, RealtimePostgresInsertPayload } from "@supabase/supabase-js";
 
+const ATTACHMENT_BUCKET = "chat-attachments";
+
+type CourseMessagePayload = {
+  content?: string;
+  attachmentUrl?: string | null;
+  attachmentType?: string | null;
+  attachmentName?: string | null;
+  attachmentSize?: number | null;
+};
+
+type UploadAttachmentOptions = {
+  userId: string;
+  courseChatId: string;
+  uri: string;
+  mimeType?: string | null;
+  name?: string | null;
+};
+
+type UploadedAttachment = {
+  publicUrl: string;
+  path: string;
+  fileName: string;
+  contentType: string;
+  size: number;
+};
+
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+  "application/pdf": "pdf",
+};
+
+const getExtension = (mimeType?: string | null, originalName?: string | null) => {
+  if (originalName && originalName.includes(".")) {
+    return originalName.split(".").pop()?.toLowerCase() || "bin";
+  }
+
+  if (mimeType && MIME_EXTENSION_MAP[mimeType]) {
+    return MIME_EXTENSION_MAP[mimeType];
+  }
+
+  return "bin";
+};
+
+const generateFileName = (extension: string) => {
+  const safeExtension = extension.replace(/[^a-z0-9]/gi, "") || "bin";
+  const uniquePart = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${uniquePart}.${safeExtension}`;
+};
+
+const fetchFileBlob = async (uri: string) => {
+  const response = await fetch(uri);
+  if (!response.ok) {
+    throw new Error("Failed to read file for upload");
+  }
+  return response.blob();
+};
+
 export const chatService = {
   // Get course chat room
   getCourseChatRoom: async (courseId: string) => {
@@ -31,20 +92,62 @@ export const chatService = {
   sendCourseMessage: async (
     courseChatId: string,
     userId: string,
-    content: string
+    payload: CourseMessagePayload
   ) => {
     const { data, error } = await supabase
       .from("messages")
       .insert({
         course_chat_id: courseChatId,
         user_id: userId,
-        content,
+        content: payload.content ?? "",
+        attachment_url: payload.attachmentUrl ?? null,
+        attachment_type: payload.attachmentType ?? null,
+        attachment_name: payload.attachmentName ?? null,
+        attachment_size: payload.attachmentSize ?? null,
       })
       .select("*, profiles(name, watiam_id)")
       .single();
 
     if (error) throw error;
     return data;
+  },
+
+  uploadChatAttachment: async (
+    options: UploadAttachmentOptions
+  ): Promise<UploadedAttachment> => {
+    const blob = await fetchFileBlob(options.uri);
+    const extension = getExtension(options.mimeType, options.name);
+    const fileName = generateFileName(extension);
+    const filePath = `${options.courseChatId}/${options.userId}/${fileName}`;
+    const contentType = options.mimeType || "application/octet-stream";
+
+    const { error: uploadError } = await supabase.storage
+      .from(ATTACHMENT_BUCKET)
+      .upload(filePath, blob, {
+        upsert: false,
+        contentType,
+        cacheControl: "3600",
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+      .from(ATTACHMENT_BUCKET)
+      .getPublicUrl(filePath, {
+        download: false,
+      });
+
+    if (!data?.publicUrl) {
+      throw new Error("Failed to generate attachment URL");
+    }
+
+    return {
+      publicUrl: data.publicUrl,
+      path: filePath,
+      fileName: options.name || fileName,
+      contentType,
+      size: blob.size,
+    };
   },
 
   getMessageWithProfile: async (messageId: string) => {
