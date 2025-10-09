@@ -42,11 +42,19 @@ export default function HomeScreen() {
     try {
       console.log("[Home] Fetching courses for user", { userId: user?.id });
       const data = await courseService.getUserCourses(user!.id);
-      console.log("[Home] Loaded courses", { count: data.length });
+      console.log("[Home] Loaded courses successfully", { count: data.length, courses: data });
       setCourses(data);
     } catch (error) {
-      console.error("Error loading courses:", error);
+      console.error("[Home] ERROR loading courses:", error);
+      // Show error details
+      if (error instanceof Error) {
+        console.error("[Home] Error message:", error.message);
+        console.error("[Home] Error stack:", error.stack);
+      }
+      // Set empty array on error so loading stops
+      setCourses([]);
     } finally {
+      console.log("[Home] Loading complete, setting loading to false");
       setLoading(false);
       setRefreshing(false);
     }
