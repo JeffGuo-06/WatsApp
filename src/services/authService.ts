@@ -1,5 +1,6 @@
 import { supabase, clearSupabaseSession } from "../lib/supabase";
 import { makeRedirectUri } from "expo-auth-session";
+import SessionManager, { UserSession } from "../utils/SessionManager";
 
 const WATERLOO_EMAIL_DOMAIN = "uwaterloo.ca";
 const WATIAM_REGEX = /^[a-z][a-z0-9]{2,15}$/;
@@ -273,6 +274,116 @@ export const authService = {
   deleteAccount: async () => {
     const { error } = await supabase.rpc("delete_current_user");
     if (error) throw error;
+  },
+
+  // ========== Session Management ==========
+
+  /**
+   * Track/update the current session in the database
+   * Call this on login and periodically during app usage
+   */
+  trackSession: async () => {
+    try {
+      const deviceId = await SessionManager.getDeviceId();
+      const deviceInfo = await SessionManager.getDeviceInfo();
+      const deviceName = await SessionManager.getDeviceName();
+      const userAgent = SessionManager.getUserAgent();
+
+      const { data, error } = await supabase.rpc("upsert_user_session", {
+        p_device_id: deviceId,
+        p_device_name: deviceName,
+        p_device_type: deviceInfo.deviceType,
+        p_device_info: deviceInfo,
+        p_ip_address: null, // Could be detected server-side
+        p_user_agent: userAgent,
+      });
+
+      if (error) throw error;
+      return data;
+    } catch (error) {
+      console.error("Error tracking session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Get all active sessions for the current user
+   */
+  getActiveSessions: async (): Promise<UserSession[]> => {
+    try {
+      const currentDeviceId = await SessionManager.getDeviceId();
+
+      const { data, error } = await supabase.rpc("get_active_sessions");
+
+      if (error) throw error;
+
+      // Mark the current device
+      const sessions = (data || []).map((session: any) => ({
+        ...session,
+        is_current: session.device_id === currentDeviceId,
+      }));
+
+      return sessions;
+    } catch (error) {
+      console.error("Error getting active sessions:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Revoke a specific session by ID
+   */
+  revokeSession: async (sessionId: string): Promise<boolean> => {
+    try {
+      const { data, error } = await supabase.rpc("revoke_session", {
+        p_session_id: sessionId,
+      });
+
+      if (error) throw error;
+      return data === true;
+    } catch (error) {
+      console.error("Error revoking session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Revoke all sessions except the current device
+   */
+  revokeAllOtherSessions: async (): Promise<number> => {
+    try {
+      const currentDeviceId = await SessionManager.getDeviceId();
+
+      const { data, error } = await supabase.rpc("revoke_all_other_sessions", {
+        p_current_device_id: currentDeviceId,
+      });
+
+      if (error) throw error;
+      return data || 0;
+    } catch (error) {
+      console.error("Error revoking other sessions:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Sign out and revoke the current session
+   */
+  signOutAndRevokeSession: async () => {
+    try {
+      // First revoke the current device session
+      const currentDeviceId = await SessionManager.getDeviceId();
+      await supabase.rpc("revoke_all_other_sessions", {
+        p_current_device_id: "non-existent", // Revoke current by excluding it from keep list
+      });
+
+      // Then sign out from Supabase
+      await authService.signOut();
+    } catch (error) {
+      console.error("Error signing out and revoking session:", error);
+      // Still attempt to sign out even if revocation fails
+      await authService.signOut();
+    }
   },
 };
 
