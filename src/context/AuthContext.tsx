@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from "react";
 import { supabase } from "../lib/supabase";
 import { User, Session } from "@supabase/supabase-js";
+import { authService } from "../services/authService";
 
 interface Profile {
   id: string;
@@ -67,11 +68,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        await fetchProfile(session.user.id);
+        // Track session on app start if authenticated
+        try {
+          await authService.trackSession();
+        } catch (error) {
+          console.error("Failed to track session on startup:", error);
+        }
       }
       setLoading(false);
     });
@@ -79,11 +86,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
-        fetchProfile(session.user.id);
+        await fetchProfile(session.user.id);
+        // Track session on login/auth change
+        try {
+          await authService.trackSession();
+        } catch (error) {
+          console.error("Failed to track session on auth change:", error);
+        }
       } else {
         setProfile(null);
       }
@@ -92,6 +105,21 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Periodically update session activity (every 10 minutes)
+  useEffect(() => {
+    if (!user) return;
+
+    const interval = setInterval(async () => {
+      try {
+        await authService.trackSession();
+      } catch (error) {
+        console.error("Failed to update session activity:", error);
+      }
+    }, 10 * 60 * 1000); // 10 minutes
+
+    return () => clearInterval(interval);
+  }, [user]);
 
   return (
     <AuthContext.Provider
