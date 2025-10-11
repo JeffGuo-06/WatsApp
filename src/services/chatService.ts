@@ -79,7 +79,7 @@ export const chatService = {
   getCourseMessages: async (courseChatId: string, limit = 50) => {
     const { data, error } = await supabase
       .from("messages")
-      .select("*, profiles(name, watiam_id, avatar_url)")
+      .select("*, profiles(name, watiam_id, avatar_url, program, year, instagram, email)")
       .eq("course_chat_id", courseChatId)
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -105,7 +105,7 @@ export const chatService = {
         attachment_name: payload.attachmentName ?? null,
         attachment_size: payload.attachmentSize ?? null,
       })
-      .select("*, profiles(name, watiam_id, avatar_url)")
+      .select("*, profiles(name, watiam_id, avatar_url, program, year, instagram, email)")
       .single();
 
     if (error) throw error;
@@ -153,7 +153,7 @@ export const chatService = {
   getMessageWithProfile: async (messageId: string) => {
     const { data, error } = await supabase
       .from("messages")
-      .select("*, profiles(name, watiam_id, avatar_url)")
+      .select("*, profiles(name, watiam_id, avatar_url, program, year, instagram, email)")
       .eq("id", messageId)
       .single();
 
