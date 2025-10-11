@@ -35,8 +35,19 @@ interface Message {
   profiles?: {
     name: string;
     watiam_id: string;
+    avatar_url?: string | null;
   };
 }
+
+const getInitials = (name?: string) => {
+  if (!name) return "??";
+  const parts = name.trim().split(/\s+/);
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+  return initials || name.charAt(0).toUpperCase() || "?";
+};
 
 export default function CourseChat() {
   const params = useLocalSearchParams();
@@ -288,78 +299,108 @@ export default function CourseChat() {
     const senderName = item.profiles?.name || "Unknown";
     const hasAttachment = Boolean(item.attachment_url);
     const hasText = Boolean(item.content?.trim().length);
+    const avatarUrl = item.profiles?.avatar_url || null;
+    const avatarSource = avatarUrl ? { uri: avatarUrl } : null;
+    const avatarInitials = getInitials(senderName);
 
     return (
       <View
         style={[
-          styles.messageContainer,
-          isOwnMessage ? styles.ownMessage : styles.otherMessage,
+          styles.messageRow,
+          isOwnMessage ? styles.ownRow : styles.otherRow,
         ]}
       >
         {!isOwnMessage && (
-          <Text style={styles.senderName}>{senderName}</Text>
+          <View style={styles.avatarContainer}>
+            {avatarSource ? (
+              <Image
+                source={avatarSource}
+                style={styles.avatarImage}
+                contentFit="cover"
+              />
+            ) : (
+              <View style={styles.avatarFallback}>
+                <Text style={styles.avatarInitials}>{avatarInitials}</Text>
+              </View>
+            )}
+          </View>
         )}
         <View
           style={[
-            styles.messageBubble,
-            isOwnMessage ? styles.ownBubble : styles.otherBubble,
+            styles.messageContent,
+            isOwnMessage ? styles.ownContent : styles.otherContent,
           ]}
         >
-          {hasAttachment && item.attachment_url ? (
-            item.attachment_type?.startsWith("image/") ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => handleOpenAttachment(item.attachment_url!)}
-              >
-                <Image
-                  source={{ uri: item.attachment_url }}
+          {!isOwnMessage && (
+            <Text style={styles.senderName}>{senderName}</Text>
+          )}
+          <View
+            style={[
+              styles.messageBubble,
+              isOwnMessage ? styles.ownBubble : styles.otherBubble,
+            ]}
+          >
+            {hasAttachment && item.attachment_url ? (
+              item.attachment_type?.startsWith("image/") ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => handleOpenAttachment(item.attachment_url!)}
+                >
+                  <Image
+                    source={{ uri: item.attachment_url }}
+                    style={[
+                      styles.attachmentImage,
+                      hasText ? styles.attachmentImageWithText : null,
+                    ]}
+                    contentFit="cover"
+                  />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
                   style={[
-                    styles.attachmentImage,
-                    hasText ? styles.attachmentImageWithText : null,
+                    styles.attachmentFile,
+                    hasText ? styles.attachmentFileWithText : null,
                   ]}
-                  contentFit="cover"
-                />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[
-                  styles.attachmentFile,
-                  hasText ? styles.attachmentFileWithText : null,
-                ]}
-                onPress={() => handleOpenAttachment(item.attachment_url!)}
-              >
-                <IconSymbol name="doc.richtext" size={22} color="#000" />
-                <View style={styles.attachmentMeta}>
-                  <Text style={styles.attachmentName} numberOfLines={1}>
-                    {item.attachment_name || "Attachment"}
-                  </Text>
-                  {item.attachment_size ? (
-                    <Text style={styles.attachmentSize}>
-                      {formatFileSize(item.attachment_size)}
+                  onPress={() => handleOpenAttachment(item.attachment_url!)}
+                >
+                  <IconSymbol name="doc.richtext" size={22} color="#000" />
+                  <View style={styles.attachmentMeta}>
+                    <Text style={styles.attachmentName} numberOfLines={1}>
+                      {item.attachment_name || "Attachment"}
                     </Text>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
-            )
-          ) : null}
+                    {item.attachment_size ? (
+                      <Text style={styles.attachmentSize}>
+                        {formatFileSize(item.attachment_size)}
+                      </Text>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              )
+            ) : null}
 
-          {hasText ? (
-            <Text
-              style={[
-                styles.messageText,
-                isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
-              ]}
-            >
-              {item.content}
-            </Text>
-          ) : null}
+            {hasText ? (
+              <Text
+                style={[
+                  styles.messageText,
+                  isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
+                ]}
+              >
+                {item.content}
+              </Text>
+            ) : null}
+          </View>
+          <Text
+            style={[
+              styles.timestamp,
+              isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp,
+            ]}
+          >
+            {new Date(item.created_at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </Text>
         </View>
-        <Text style={styles.timestamp}>
-          {new Date(item.created_at).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </Text>
       </View>
     );
   };
@@ -550,21 +591,60 @@ const styles = StyleSheet.create({
     padding: 15,
     flexGrow: 1,
   },
-  messageContainer: {
-    marginBottom: 15,
+  messageRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginBottom: 18,
+    paddingHorizontal: 4,
+  },
+  ownRow: {
+    justifyContent: "flex-end",
+  },
+  otherRow: {
+    justifyContent: "flex-start",
+  },
+  avatarContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: "hidden",
+    marginRight: 12,
+    backgroundColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarImage: {
+    width: "100%",
+    height: "100%",
+  },
+  avatarFallback: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1F2937",
+  },
+  avatarInitials: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  messageContent: {
+    flexShrink: 1,
     maxWidth: "80%",
   },
-  ownMessage: {
+  ownContent: {
+    alignItems: "flex-end",
     alignSelf: "flex-end",
   },
-  otherMessage: {
-    alignSelf: "flex-start",
+  otherContent: {
+    alignItems: "flex-start",
   },
   senderName: {
     fontSize: 12,
     color: "#666",
     marginBottom: 4,
-    marginLeft: 10,
   },
   messageBubble: {
     padding: 12,
@@ -590,8 +670,13 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 11,
     color: "#999",
-    marginTop: 4,
-    marginHorizontal: 10,
+    marginTop: 6,
+  },
+  ownTimestamp: {
+    alignSelf: "flex-end",
+  },
+  otherTimestamp: {
+    alignSelf: "flex-start",
   },
   attachmentImage: {
     width: 220,

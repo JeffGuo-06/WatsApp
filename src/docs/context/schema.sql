@@ -48,6 +48,7 @@ CREATE TABLE public.profiles (
   name character varying NOT NULL,
   program character varying,
   year character varying,
+  instagram character varying,
   created_at timestamp without time zone DEFAULT now(),
   updated_at timestamp without time zone DEFAULT now(),
   avatar_url text,

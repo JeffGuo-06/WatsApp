@@ -13,14 +13,26 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { supabase } from "@/lib/supabase";
 import { courseService } from "@/services/courseService";
 import Snackbar from "@/components/Snackbar";
+import { Image } from "expo-image";
 
 interface CourseMember {
   id: string;
   profiles: {
     name: string;
     watiam_id: string;
+    avatar_url?: string | null;
   };
 }
+
+const getInitials = (name?: string) => {
+  if (!name) return "?";
+  const parts = name.trim().split(/\s+/);
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+  return initials || name.charAt(0).toUpperCase() || "?";
+};
 
 export default function CourseDetails() {
   const params = useLocalSearchParams();
@@ -45,7 +57,7 @@ export default function CourseDetails() {
       // Get all members enrolled in this course
       const { data: enrollments, error } = await supabase
         .from("user_courses")
-        .select("id, user_id, profiles(name, watiam_id)")
+        .select("id, user_id, profiles(name, watiam_id, avatar_url)")
         .eq("course_id", courseId as string);
 
       if (error) throw error;
@@ -124,10 +136,20 @@ export default function CourseDetails() {
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => (
               <View style={styles.memberCard}>
-                <View style={styles.avatarCircle}>
-                  <Text style={styles.avatarText}>
-                    {item.profiles?.name?.charAt(0).toUpperCase() || "?"}
-                  </Text>
+                <View style={styles.avatarWrapper}>
+                  {item.profiles?.avatar_url ? (
+                    <Image
+                      source={{ uri: item.profiles.avatar_url }}
+                      style={styles.avatarImage}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <View style={styles.avatarFallback}>
+                      <Text style={styles.avatarFallbackText}>
+                        {getInitials(item.profiles?.name)}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 <View style={styles.memberInfo}>
                   <Text style={styles.memberName}>{item.profiles?.name}</Text>
@@ -220,16 +242,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#f0f0f0",
   },
-  avatarCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#FDB515",
-    justifyContent: "center",
-    alignItems: "center",
+  avatarWrapper: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    overflow: "hidden",
     marginRight: 12,
+    backgroundColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  avatarText: {
+  avatarImage: {
+    width: "100%",
+    height: "100%",
+  },
+  avatarFallback: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#FDB515",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarFallbackText: {
     fontSize: 18,
     fontWeight: "bold",
     color: "#000",
