@@ -9,6 +9,7 @@ type CourseMessagePayload = {
   attachmentType?: string | null;
   attachmentName?: string | null;
   attachmentSize?: number | null;
+  replyToMessageId?: string | null;
 };
 
 type UploadAttachmentOptions = {
@@ -79,7 +80,9 @@ export const chatService = {
   getCourseMessages: async (courseChatId: string, limit = 50) => {
     const { data, error } = await supabase
       .from("messages")
-      .select("*, profiles(name, watiam_id, avatar_url, program, year, instagram, email)")
+      .select(
+        "*, profiles(name, watiam_id, avatar_url), reply_to:reply_to_message_id(id, content, user_id, attachment_url, profiles(name, avatar_url))"
+      )
       .eq("course_chat_id", courseChatId)
       .order("created_at", { ascending: false })
       .limit(limit);
@@ -104,8 +107,11 @@ export const chatService = {
         attachment_type: payload.attachmentType ?? null,
         attachment_name: payload.attachmentName ?? null,
         attachment_size: payload.attachmentSize ?? null,
+        reply_to_message_id: payload.replyToMessageId ?? null,
       })
-      .select("*, profiles(name, watiam_id, avatar_url, program, year, instagram, email)")
+      .select(
+        "*, profiles(name, watiam_id, avatar_url), reply_to:reply_to_message_id(id, content, user_id, attachment_url, profiles(name, avatar_url))"
+      )
       .single();
 
     if (error) throw error;
@@ -153,7 +159,9 @@ export const chatService = {
   getMessageWithProfile: async (messageId: string) => {
     const { data, error } = await supabase
       .from("messages")
-      .select("*, profiles(name, watiam_id, avatar_url, program, year, instagram, email)")
+      .select(
+        "*, profiles(name, watiam_id, avatar_url), reply_to:reply_to_message_id(id, content, user_id, attachment_url, profiles(name, avatar_url))"
+      )
       .eq("id", messageId)
       .single();
 

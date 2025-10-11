@@ -12,6 +12,7 @@ import {
   Modal,
   Alert,
   Linking,
+  Pressable,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -42,6 +43,17 @@ interface Message {
     instagram?: string | null;
     email?: string | null;
   };
+  reply_to_message_id?: string | null;
+  reply_to?: {
+    id: string;
+    content: string | null;
+    user_id: string;
+    attachment_url?: string | null;
+    profiles?: {
+      name: string;
+      avatar_url?: string | null;
+    } | null;
+  } | null;
 }
 
 const getInitials = (name?: string) => {
@@ -91,6 +103,7 @@ export default function CourseChat() {
   const [snackbar, setSnackbar] = useState({ visible: false, message: "", type: "success" as "success" | "error" | "info" });
   const [selectedMember, setSelectedMember] = useState<Message | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -111,7 +124,11 @@ export default function CourseChat() {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
 
-      if (!incoming.profiles?.name) {
+      const needsEnrichment =
+        !incoming.profiles?.name ||
+        (incoming as any).reply_to_message_id;
+
+      if (needsEnrichment) {
         try {
           const enriched = await chatService.getMessageWithProfile(incoming.id);
           if (enriched) {
@@ -220,17 +237,18 @@ export default function CourseChat() {
     router.back();
   };
 
-  const sendMessage = async () => {
-    if (!newMessage.trim() || !currentUserId || sending) return;
+  const sendMessage = async (overrideContent?: string) => {
+    const messageText = (overrideContent ?? newMessage).trim();
+    if (!messageText || !currentUserId || sending) return;
 
     setSending(true);
     try {
-      await chatService.sendCourseMessage(
-        courseChatId as string,
-        currentUserId,
-        { content: newMessage.trim() }
-      );
+      await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
+        content: messageText,
+        replyToMessageId: replyTarget?.id ?? null,
+      });
       setNewMessage("");
+      cancelReply();
     } catch (error) {
       console.error("Error sending message:", error);
     } finally {
@@ -271,7 +289,9 @@ export default function CourseChat() {
         attachmentType: uploaded.contentType,
         attachmentName: uploaded.fileName,
         attachmentSize: uploaded.size,
+        replyToMessageId: replyTarget?.id ?? null,
       });
+      cancelReply();
     } catch (error) {
       console.error("Error uploading attachment:", error);
       Alert.alert("Upload failed", "We couldn't upload that file. Please try again.");
@@ -326,6 +346,44 @@ export default function CourseChat() {
   const closeProfileModal = () => {
     setProfileModalVisible(false);
     setSelectedMember(null);
+  };
+
+  const cancelReply = () => {
+    setReplyTarget(null);
+  };
+
+  const summarizeMessage = (
+    message: { content?: string | null; attachment_url?: string | null } | null
+  ) => {
+    if (!message) return "";
+    const text = message.content?.trim();
+    if (text) return text;
+    if (message.attachment_url) return "Attachment";
+    return "Message";
+  };
+
+  const scrollToMessage = (messageId: string | null) => {
+    if (!messageId) return;
+    const index = messages.findIndex((msg) => msg.id === messageId);
+    if (index === -1) return;
+    try {
+      flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    } catch (error) {
+      console.warn("Unable to scroll to message", error);
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }
+  };
+
+  const handleChangeText = (text: string) => {
+    if (text.endsWith("\n")) {
+      const sanitized = text.replace(/[\r\n]+$/, "");
+      setNewMessage(sanitized);
+      if (sanitized.trim().length > 0) {
+        sendMessage(sanitized);
+      }
+      return;
+    }
+    setNewMessage(text);
   };
 
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
@@ -390,25 +448,65 @@ export default function CourseChat() {
         )}
         <View
           style={[
-            styles.messageContent,
-            isOwnMessage ? styles.ownContent : styles.otherContent,
+            styles.messageColumn,
+            isOwnMessage ? styles.messageColumnOwn : styles.messageColumnOther,
           ]}
         >
           {!isOwnMessage && !previousSameSender && (
             <Text style={styles.senderName}>{senderName}</Text>
           )}
-          <View
-            style={[
-              styles.messageBubble,
-              isOwnMessage ? styles.ownBubble : styles.otherBubble,
-              isOwnMessage && isFirstInGroup && styles.ownFirstBubble,
-              isOwnMessage && !isFirstInGroup && styles.ownMidBubble,
-              isOwnMessage && isLastInGroup && styles.ownLastBubble,
-              !isOwnMessage && isFirstInGroup && styles.otherFirstBubble,
-              !isOwnMessage && !isFirstInGroup && styles.otherMidBubble,
-              !isOwnMessage && isLastInGroup && styles.otherLastBubble,
+          <Pressable
+            style={({ pressed }) => [
+              styles.messagePressable,
+              pressed && styles.messagePressed,
             ]}
+            delayLongPress={250}
+            onLongPress={() => setReplyTarget(item)}
           >
+            <View
+              style={[
+                styles.messageBubble,
+                isOwnMessage ? styles.ownBubble : styles.otherBubble,
+                isOwnMessage && isFirstInGroup && styles.ownFirstBubble,
+                isOwnMessage && !isFirstInGroup && styles.ownMidBubble,
+                isOwnMessage && isLastInGroup && styles.ownLastBubble,
+                !isOwnMessage && isFirstInGroup && styles.otherFirstBubble,
+                !isOwnMessage && !isFirstInGroup && styles.otherMidBubble,
+                !isOwnMessage && isLastInGroup && styles.otherLastBubble,
+                replyTarget?.id === item.id && styles.messageBubbleActive,
+              ]}
+            >
+              {item.reply_to ? (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => scrollToMessage(item.reply_to?.id ?? null)}
+                  style={[
+                    styles.replySnippet,
+                    isOwnMessage
+                      ? styles.replySnippetOwn
+                      : styles.replySnippetOther,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.replySnippetAuthor,
+                      isOwnMessage && styles.replySnippetAuthorOwn,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.reply_to?.profiles?.name || "Unknown"}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.replySnippetMessage,
+                      isOwnMessage && styles.replySnippetMessageOwn,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {summarizeMessage(item.reply_to)}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
             {hasAttachment && item.attachment_url ? (
               item.attachment_type?.startsWith("image/") ? (
                 <TouchableOpacity
@@ -457,7 +555,8 @@ export default function CourseChat() {
                 {item.content}
               </Text>
             ) : null}
-          </View>
+            </View>
+          </Pressable>
           <Text
             style={[
               styles.timestamp,
@@ -520,6 +619,7 @@ export default function CourseChat() {
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={renderMessage}
+        extraData={replyTarget?.id}
         contentContainerStyle={styles.messagesList}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
         ListEmptyComponent={
@@ -566,9 +666,30 @@ export default function CourseChat() {
                 )}
               </TouchableOpacity>
             </View>
+      </View>
+    </View>
+  </Modal>
+
+      {replyTarget && (
+        <View style={styles.replyPreview}>
+          <View style={styles.replyPreviewIndicator} />
+          <View style={styles.replyPreviewText}>
+            <Text style={styles.replyPreviewLabel} numberOfLines={1}>
+              Replying to {replyTarget.profiles?.name || "Unknown"}
+            </Text>
+            <Text style={styles.replyPreviewMessage} numberOfLines={1}>
+              {summarizeMessage(replyTarget)}
+            </Text>
           </View>
+          <TouchableOpacity
+            onPress={cancelReply}
+            style={styles.replyPreviewClose}
+            accessibilityLabel="Cancel reply"
+          >
+            <IconSymbol name="xmark.circle.fill" size={22} color="#64748B" />
+          </TouchableOpacity>
         </View>
-      </Modal>
+      )}
 
       <View style={styles.inputContainer}>
         <View style={styles.inputActions}>
@@ -591,9 +712,11 @@ export default function CourseChat() {
           style={styles.input}
           placeholder="Type a message..."
           value={newMessage}
-          onChangeText={setNewMessage}
+          onChangeText={handleChangeText}
+          onSubmitEditing={() => sendMessage()}
           multiline
           maxLength={1000}
+          returnKeyType="send"
         />
         <TouchableOpacity
           style={[
@@ -813,21 +936,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  messageContent: {
-    flexShrink: 1,
-    maxWidth: "80%",
-  },
-  ownContent: {
-    alignItems: "flex-end",
-    alignSelf: "flex-end",
-  },
-  otherContent: {
-    alignItems: "flex-start",
-  },
   senderName: {
     fontSize: 12,
     color: "#666",
     marginBottom: 4,
+  },
+  messageColumn: {
+    flexShrink: 1,
+    maxWidth: "80%",
+    gap: 4,
+  },
+  messageColumnOwn: {
+    alignItems: "flex-end",
+    alignSelf: "flex-end",
+  },
+  messageColumnOther: {
+    alignItems: "flex-start",
+  },
+  messagePressable: {
+    width: "100%",
+    borderRadius: 18,
+  },
+  messagePressed: {
+    opacity: 0.92,
   },
   messageBubble: {
     padding: 12,
@@ -861,6 +992,10 @@ const styles = StyleSheet.create({
   otherLastBubble: {
     borderBottomLeftRadius: 16,
   },
+  messageBubbleActive: {
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.45)",
+  },
   messageText: {
     fontSize: 16,
   },
@@ -869,6 +1004,36 @@ const styles = StyleSheet.create({
   },
   otherMessageText: {
     color: "#000",
+  },
+  replySnippet: {
+    borderLeftWidth: 3,
+    paddingLeft: 10,
+    borderRadius: 10,
+    marginBottom: 8,
+    gap: 2,
+  },
+  replySnippetOwn: {
+    borderLeftColor: "rgba(255, 255, 255, 0.7)",
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+  },
+  replySnippetOther: {
+    borderLeftColor: "#93C5FD",
+    backgroundColor: "rgba(59, 130, 246, 0.08)",
+  },
+  replySnippetAuthor: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1F2937",
+  },
+  replySnippetAuthorOwn: {
+    color: "#0F172A",
+  },
+  replySnippetMessage: {
+    fontSize: 13,
+    color: "#4B5563",
+  },
+  replySnippetMessageOwn: {
+    color: "#1F2937",
   },
   timestamp: {
     fontSize: 11,
@@ -1048,6 +1213,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     color: "#000",
+  },
+  replyPreview: {
+    marginHorizontal: 15,
+    marginBottom: 4,
+    backgroundColor: "#E0EDFF",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  replyPreviewIndicator: {
+    width: 4,
+    backgroundColor: "#3B82F6",
+    borderRadius: 999,
+    alignSelf: "stretch",
+  },
+  replyPreviewText: {
+    flex: 1,
+    gap: 2,
+  },
+  replyPreviewLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1D4ED8",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  replyPreviewMessage: {
+    fontSize: 14,
+    color: "#0F172A",
+  },
+  replyPreviewClose: {
+    padding: 4,
   },
   profileModalOverlay: {
     flex: 1,
