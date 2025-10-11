@@ -1,5 +1,8 @@
 {
   "name": "watsapp-api",
   "version": "1.0.0",
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "expo": "^54.0.13"
+  }
 }

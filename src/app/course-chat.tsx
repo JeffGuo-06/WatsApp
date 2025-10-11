@@ -12,6 +12,7 @@ import {
   Modal,
   Alert,
   Linking,
+  Pressable,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -20,6 +21,7 @@ import { chatService } from "@/services/chatService";
 import { RealtimeChannel, RealtimePostgresInsertPayload } from "@supabase/supabase-js";
 import Snackbar from "@/components/Snackbar";
 import { Image } from "expo-image";
+import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 
@@ -35,8 +37,56 @@ interface Message {
   profiles?: {
     name: string;
     watiam_id: string;
+    avatar_url?: string | null;
+    program?: string | null;
+    year?: string | null;
+    instagram?: string | null;
+    email?: string | null;
   };
+  reply_to_message_id?: string | null;
+  reply_to?: {
+    id: string;
+    content: string | null;
+    user_id: string;
+    attachment_url?: string | null;
+    profiles?: {
+      name: string;
+      avatar_url?: string | null;
+    } | null;
+  } | null;
 }
+
+const getInitials = (name?: string) => {
+  if (!name) return "??";
+  const parts = name.trim().split(/\s+/);
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+  return initials || name.charAt(0).toUpperCase() || "?";
+};
+
+const normalizeInstagramLink = (value?: string | null) => {
+  if (!value) return null;
+  if (value.startsWith("http")) return value;
+  const handle = value.replace(/^@/, "");
+  return `https://instagram.com/${handle}`;
+};
+
+const formatInstagramHandle = (value?: string | null) => {
+  if (!value) return null;
+  if (value.startsWith("@")) return value;
+  if (value.startsWith("http")) {
+    try {
+      const url = new URL(value);
+      const [segment] = url.pathname.replace(/^\/+/, "").split("/");
+      return segment ? `@${segment}` : value;
+    } catch {
+      return value;
+    }
+  }
+  return `@${value.replace(/^@/, "")}`;
+};
 
 export default function CourseChat() {
   const params = useLocalSearchParams();
@@ -51,6 +101,10 @@ export default function CourseChat() {
   const [showModal, setShowModal] = useState(showJoinPrompt === "true");
   const [joining, setJoining] = useState(false);
   const [snackbar, setSnackbar] = useState({ visible: false, message: "", type: "success" as "success" | "error" | "info" });
+  const [selectedMember, setSelectedMember] = useState<Message | null>(null);
+  const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  const allowNewlineRef = useRef(false);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -71,7 +125,11 @@ export default function CourseChat() {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
 
-      if (!incoming.profiles?.name) {
+      const needsEnrichment =
+        !incoming.profiles?.name ||
+        (incoming as any).reply_to_message_id;
+
+      if (needsEnrichment) {
         try {
           const enriched = await chatService.getMessageWithProfile(incoming.id);
           if (enriched) {
@@ -180,17 +238,19 @@ export default function CourseChat() {
     router.back();
   };
 
-  const sendMessage = async () => {
-    if (!newMessage.trim() || !currentUserId || sending) return;
+  const sendMessage = async (overrideContent?: string | null) => {
+    const base = typeof overrideContent === "string" ? overrideContent : newMessage;
+    const messageText = base.trim();
+    if (!messageText || !currentUserId || sending) return;
 
     setSending(true);
     try {
-      await chatService.sendCourseMessage(
-        courseChatId as string,
-        currentUserId,
-        { content: newMessage.trim() }
-      );
+      await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
+        content: messageText,
+        replyToMessageId: replyTarget?.id ?? null,
+      });
       setNewMessage("");
+      cancelReply();
     } catch (error) {
       console.error("Error sending message:", error);
     } finally {
@@ -231,7 +291,9 @@ export default function CourseChat() {
         attachmentType: uploaded.contentType,
         attachmentName: uploaded.fileName,
         attachmentSize: uploaded.size,
+        replyToMessageId: replyTarget?.id ?? null,
       });
+      cancelReply();
     } catch (error) {
       console.error("Error uploading attachment:", error);
       Alert.alert("Upload failed", "We couldn't upload that file. Please try again.");
@@ -283,83 +345,245 @@ export default function CourseChat() {
     return `${bytes} B`;
   };
 
-  const renderMessage = ({ item }: { item: Message }) => {
+  const closeProfileModal = () => {
+    setProfileModalVisible(false);
+    setSelectedMember(null);
+  };
+
+  const cancelReply = () => {
+    setReplyTarget(null);
+  };
+
+  const summarizeMessage = (
+    message: { content?: string | null; attachment_url?: string | null } | null
+  ) => {
+    if (!message) return "";
+    const text = message.content?.trim();
+    if (text) return text;
+    if (message.attachment_url) return "Attachment";
+    return "Message";
+  };
+
+  const scrollToMessage = (messageId: string | null) => {
+    if (!messageId) return;
+    const index = messages.findIndex((msg) => msg.id === messageId);
+    if (index === -1) return;
+    try {
+      flatListRef.current?.scrollToIndex({ index, animated: true, viewPosition: 0.5 });
+    } catch (error) {
+      console.warn("Unable to scroll to message", error);
+      flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+    }
+  };
+
+  const handleChangeText = (text: string) => {
+    if (text.endsWith("\n")) {
+      if (allowNewlineRef.current) {
+        allowNewlineRef.current = false;
+        setNewMessage(text);
+        return;
+      }
+
+      const sanitized = text.replace(/[\r\n]+$/, "");
+      setNewMessage(sanitized);
+      if (sanitized.trim().length > 0) {
+        sendMessage(sanitized);
+      }
+      return;
+    }
+    setNewMessage(text);
+  };
+
+  const handleKeyPress = (event: { nativeEvent: { key?: string; shiftKey?: boolean } }) => {
+    if (event.nativeEvent.key === "Enter" && event.nativeEvent.shiftKey) {
+      allowNewlineRef.current = true;
+    }
+  };
+
+  const renderMessage = ({ item, index }: { item: Message; index: number }) => {
     const isOwnMessage = item.user_id === currentUserId;
     const senderName = item.profiles?.name || "Unknown";
     const hasAttachment = Boolean(item.attachment_url);
     const hasText = Boolean(item.content?.trim().length);
+    const avatarUrl = item.profiles?.avatar_url || null;
+    const avatarSource = avatarUrl ? { uri: avatarUrl } : null;
+    const avatarInitials = getInitials(senderName);
+    const previousMessage = index > 0 ? messages[index - 1] : null;
+    const nextMessage = index < messages.length - 1 ? messages[index + 1] : null;
+
+    const withinGroupWindow = 5 * 60 * 1000; // 5 minutes
+    const previousSameSender =
+      previousMessage?.user_id === item.user_id &&
+      Math.abs(new Date(item.created_at).getTime() - new Date(previousMessage.created_at).getTime()) <=
+        withinGroupWindow;
+    const nextSameSender =
+      nextMessage?.user_id === item.user_id &&
+      Math.abs(new Date(nextMessage.created_at).getTime() - new Date(item.created_at).getTime()) <=
+        withinGroupWindow;
+    const isFirstInGroup = !previousSameSender;
+    const isLastInGroup = !nextSameSender;
 
     return (
       <View
         style={[
-          styles.messageContainer,
-          isOwnMessage ? styles.ownMessage : styles.otherMessage,
+          styles.messageRow,
+          isOwnMessage ? styles.ownRow : styles.otherRow,
+          !isFirstInGroup && styles.messageRowGrouped,
+          !isLastInGroup && styles.messageRowConnected,
         ]}
       >
         {!isOwnMessage && (
-          <Text style={styles.senderName}>{senderName}</Text>
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => {
+              setSelectedMember(item);
+              setProfileModalVisible(true);
+            }}
+          >
+            <View
+              style={[
+                styles.avatarContainer,
+                previousSameSender && styles.avatarHidden,
+              ]}
+            >
+              {avatarSource ? (
+                <Image
+                  source={avatarSource}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <View style={styles.avatarFallback}>
+                  <Text style={styles.avatarInitials}>{avatarInitials}</Text>
+                </View>
+              )}
+            </View>
+          </TouchableOpacity>
         )}
         <View
           style={[
-            styles.messageBubble,
-            isOwnMessage ? styles.ownBubble : styles.otherBubble,
+            styles.messageColumn,
+            isOwnMessage ? styles.messageColumnOwn : styles.messageColumnOther,
           ]}
         >
-          {hasAttachment && item.attachment_url ? (
-            item.attachment_type?.startsWith("image/") ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => handleOpenAttachment(item.attachment_url!)}
-              >
-                <Image
-                  source={{ uri: item.attachment_url }}
-                  style={[
-                    styles.attachmentImage,
-                    hasText ? styles.attachmentImageWithText : null,
-                  ]}
-                  contentFit="cover"
-                />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[
-                  styles.attachmentFile,
-                  hasText ? styles.attachmentFileWithText : null,
-                ]}
-                onPress={() => handleOpenAttachment(item.attachment_url!)}
-              >
-                <IconSymbol name="doc.richtext" size={22} color="#000" />
-                <View style={styles.attachmentMeta}>
-                  <Text style={styles.attachmentName} numberOfLines={1}>
-                    {item.attachment_name || "Attachment"}
-                  </Text>
-                  {item.attachment_size ? (
-                    <Text style={styles.attachmentSize}>
-                      {formatFileSize(item.attachment_size)}
-                    </Text>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
-            )
-          ) : null}
-
-          {hasText ? (
-            <Text
+          {!isOwnMessage && !previousSameSender && (
+            <Text style={styles.senderName}>{senderName}</Text>
+          )}
+          <Pressable
+            style={({ pressed }) => [
+              styles.messagePressable,
+              pressed && styles.messagePressed,
+            ]}
+            delayLongPress={250}
+            onLongPress={() => setReplyTarget(item)}
+          >
+            <View
               style={[
-                styles.messageText,
-                isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
+                styles.messageBubble,
+                isOwnMessage ? styles.ownBubble : styles.otherBubble,
+                isOwnMessage && isFirstInGroup && styles.ownFirstBubble,
+                isOwnMessage && !isFirstInGroup && styles.ownMidBubble,
+                isOwnMessage && isLastInGroup && styles.ownLastBubble,
+                !isOwnMessage && isFirstInGroup && styles.otherFirstBubble,
+                !isOwnMessage && !isFirstInGroup && styles.otherMidBubble,
+                !isOwnMessage && isLastInGroup && styles.otherLastBubble,
+                replyTarget?.id === item.id && styles.messageBubbleActive,
               ]}
             >
-              {item.content}
-            </Text>
-          ) : null}
+              {item.reply_to ? (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => scrollToMessage(item.reply_to?.id ?? null)}
+                  style={[
+                    styles.replySnippet,
+                    isOwnMessage
+                      ? styles.replySnippetOwn
+                      : styles.replySnippetOther,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.replySnippetAuthor,
+                      isOwnMessage && styles.replySnippetAuthorOwn,
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {item.reply_to?.profiles?.name || "Unknown"}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.replySnippetMessage,
+                      isOwnMessage && styles.replySnippetMessageOwn,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {summarizeMessage(item.reply_to)}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            {hasAttachment && item.attachment_url ? (
+              item.attachment_type?.startsWith("image/") ? (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => handleOpenAttachment(item.attachment_url!)}
+                >
+                  <Image
+                    source={{ uri: item.attachment_url }}
+                    style={[
+                      styles.attachmentImage,
+                      hasText ? styles.attachmentImageWithText : null,
+                    ]}
+                    contentFit="cover"
+                  />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.attachmentFile,
+                    hasText ? styles.attachmentFileWithText : null,
+                  ]}
+                  onPress={() => handleOpenAttachment(item.attachment_url!)}
+                >
+                  <IconSymbol name="doc.richtext" size={22} color="#000" />
+                  <View style={styles.attachmentMeta}>
+                    <Text style={styles.attachmentName} numberOfLines={1}>
+                      {item.attachment_name || "Attachment"}
+                    </Text>
+                    {item.attachment_size ? (
+                      <Text style={styles.attachmentSize}>
+                        {formatFileSize(item.attachment_size)}
+                      </Text>
+                    ) : null}
+                  </View>
+                </TouchableOpacity>
+              )
+            ) : null}
+
+            {hasText ? (
+              <Text
+                style={[
+                  styles.messageText,
+                  isOwnMessage ? styles.ownMessageText : styles.otherMessageText,
+                ]}
+              >
+                {item.content}
+              </Text>
+            ) : null}
+            </View>
+          </Pressable>
+          <Text
+            style={[
+              styles.timestamp,
+              isOwnMessage ? styles.ownTimestamp : styles.otherTimestamp,
+              !isLastInGroup && styles.timestampHidden,
+            ]}
+          >
+            {new Date(item.created_at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </Text>
         </View>
-        <Text style={styles.timestamp}>
-          {new Date(item.created_at).toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </Text>
       </View>
     );
   };
@@ -409,6 +633,7 @@ export default function CourseChat() {
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={renderMessage}
+        extraData={replyTarget?.id}
         contentContainerStyle={styles.messagesList}
         onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
         ListEmptyComponent={
@@ -455,9 +680,30 @@ export default function CourseChat() {
                 )}
               </TouchableOpacity>
             </View>
+      </View>
+    </View>
+  </Modal>
+
+      {replyTarget && (
+        <View style={styles.replyPreview}>
+          <View style={styles.replyPreviewIndicator} />
+          <View style={styles.replyPreviewText}>
+            <Text style={styles.replyPreviewLabel} numberOfLines={1}>
+              Replying to {replyTarget.profiles?.name || "Unknown"}
+            </Text>
+            <Text style={styles.replyPreviewMessage} numberOfLines={1}>
+              {summarizeMessage(replyTarget)}
+            </Text>
           </View>
+          <TouchableOpacity
+            onPress={cancelReply}
+            style={styles.replyPreviewClose}
+            accessibilityLabel="Cancel reply"
+          >
+            <IconSymbol name="xmark.circle.fill" size={22} color="#64748B" />
+          </TouchableOpacity>
         </View>
-      </Modal>
+      )}
 
       <View style={styles.inputContainer}>
         <View style={styles.inputActions}>
@@ -480,16 +726,19 @@ export default function CourseChat() {
           style={styles.input}
           placeholder="Type a message..."
           value={newMessage}
-          onChangeText={setNewMessage}
+          onChangeText={handleChangeText}
+          onKeyPress={handleKeyPress}
+          onSubmitEditing={() => sendMessage(null)}
           multiline
           maxLength={1000}
+          returnKeyType="send"
         />
         <TouchableOpacity
           style={[
             styles.sendButton,
             (!newMessage.trim() || sending || uploadingAttachment) && styles.sendButtonDisabled,
           ]}
-          onPress={sendMessage}
+          onPress={() => sendMessage(null)}
           disabled={!newMessage.trim() || sending || uploadingAttachment}
         >
           {sending ? (
@@ -506,6 +755,110 @@ export default function CourseChat() {
         type={snackbar.type}
         onDismiss={() => setSnackbar({ ...snackbar, visible: false })}
       />
+      <Modal
+        visible={profileModalVisible && !!selectedMember}
+        transparent
+        animationType="fade"
+        onRequestClose={closeProfileModal}
+      >
+        <TouchableOpacity
+          style={styles.profileModalOverlay}
+          activeOpacity={1}
+          onPress={closeProfileModal}
+        >
+          <TouchableOpacity
+            style={styles.profileModalContent}
+            activeOpacity={1}
+            onPress={(event) => event.stopPropagation()}
+          >
+            <TouchableOpacity
+              style={styles.profileModalClose}
+              onPress={closeProfileModal}
+            >
+              <IconSymbol name="xmark.circle.fill" size={24} color="#64748B" />
+            </TouchableOpacity>
+            <View style={styles.profileModalHeader}>
+              <View style={styles.profileModalAvatarWrapper}>
+                {selectedMember?.profiles?.avatar_url ? (
+                  <Image
+                    source={{ uri: selectedMember.profiles.avatar_url }}
+                    style={styles.profileModalAvatar}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={styles.profileModalAvatarFallback}>
+                    <Text style={styles.profileModalInitials}>
+                      {getInitials(selectedMember?.profiles?.name)}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={styles.profileModalName}>{selectedMember?.profiles?.name}</Text>
+              <Text style={styles.profileModalHandle}>
+                @{selectedMember?.profiles?.watiam_id}
+              </Text>
+            </View>
+            <View style={styles.profileModalDetails}>
+              {selectedMember?.profiles?.email ? (
+                <View style={styles.profileModalRow}>
+                  <Text style={styles.profileModalLabel}>Email</Text>
+                  <Text style={styles.profileModalValue}>
+                    {selectedMember.profiles.email}
+                  </Text>
+                </View>
+              ) : null}
+              {selectedMember?.profiles?.program ? (
+                <View style={styles.profileModalRow}>
+                  <Text style={styles.profileModalLabel}>Program</Text>
+                  <Text style={styles.profileModalValue}>
+                    {selectedMember.profiles.program}
+                  </Text>
+                </View>
+              ) : null}
+              {selectedMember?.profiles?.year ? (
+                <View style={styles.profileModalRow}>
+                  <Text style={styles.profileModalLabel}>Year</Text>
+                  <Text style={styles.profileModalValue}>
+                    {selectedMember.profiles.year}
+                  </Text>
+                </View>
+              ) : null}
+              {selectedMember?.profiles?.instagram ? (
+                <View style={styles.profileConnectionGroup}>
+                  <Text style={styles.profileModalLabel}>Instagram</Text>
+                  <TouchableOpacity
+                    style={styles.profileConnectionCard}
+                    activeOpacity={0.85}
+                    onPress={() => {
+                      const url = normalizeInstagramLink(selectedMember.profiles?.instagram);
+                      if (url) {
+                        Linking.openURL(url).catch(() =>
+                          setSnackbar({
+                            visible: true,
+                            message: "Could not open Instagram",
+                            type: "error",
+                          })
+                        );
+                      }
+                    }}
+                  >
+                    <View style={styles.profileConnectionIconWrapper}>
+                      <Ionicons name="logo-instagram" size={28} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.profileConnectionInfo}>
+                      <Text style={styles.profileConnectionHandle}>
+                        {formatInstagramHandle(selectedMember.profiles.instagram)}
+                      </Text>
+                      <Text style={styles.profileConnectionSubtitle}>Instagram</Text>
+                    </View>
+                    <IconSymbol name="arrow.up.right" size={18} color="#BFDBFE" />
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -550,21 +903,77 @@ const styles = StyleSheet.create({
     padding: 15,
     flexGrow: 1,
   },
-  messageContainer: {
-    marginBottom: 15,
-    maxWidth: "80%",
+  messageRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    marginBottom: 18,
+    paddingHorizontal: 4,
   },
-  ownMessage: {
-    alignSelf: "flex-end",
+  messageRowGrouped: {
+    marginTop: -4,
   },
-  otherMessage: {
-    alignSelf: "flex-start",
+  messageRowConnected: {
+    marginBottom: 6,
+  },
+  ownRow: {
+    justifyContent: "flex-end",
+  },
+  otherRow: {
+    justifyContent: "flex-start",
+  },
+  avatarContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: "hidden",
+    marginRight: 12,
+    backgroundColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  avatarHidden: {
+    opacity: 0,
+  },
+  avatarImage: {
+    width: "100%",
+    height: "100%",
+  },
+  avatarFallback: {
+    flex: 1,
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#1F2937",
+  },
+  avatarInitials: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "700",
   },
   senderName: {
     fontSize: 12,
     color: "#666",
     marginBottom: 4,
-    marginLeft: 10,
+  },
+  messageColumn: {
+    flexShrink: 1,
+    maxWidth: "80%",
+    gap: 4,
+  },
+  messageColumnOwn: {
+    alignItems: "flex-end",
+    alignSelf: "flex-end",
+  },
+  messageColumnOther: {
+    alignItems: "flex-start",
+  },
+  messagePressable: {
+    width: "100%",
+    borderRadius: 18,
+  },
+  messagePressed: {
+    opacity: 0.92,
   },
   messageBubble: {
     padding: 12,
@@ -572,11 +981,35 @@ const styles = StyleSheet.create({
   },
   ownBubble: {
     backgroundColor: "#FDB515",
-    borderBottomRightRadius: 4,
   },
   otherBubble: {
     backgroundColor: "#fff",
-    borderBottomLeftRadius: 4,
+  },
+  ownFirstBubble: {
+    borderTopRightRadius: 16,
+    borderBottomRightRadius: 6,
+  },
+  ownMidBubble: {
+    borderTopRightRadius: 6,
+    borderBottomRightRadius: 6,
+  },
+  ownLastBubble: {
+    borderBottomRightRadius: 16,
+  },
+  otherFirstBubble: {
+    borderTopLeftRadius: 16,
+    borderBottomLeftRadius: 6,
+  },
+  otherMidBubble: {
+    borderTopLeftRadius: 6,
+    borderBottomLeftRadius: 6,
+  },
+  otherLastBubble: {
+    borderBottomLeftRadius: 16,
+  },
+  messageBubbleActive: {
+    borderWidth: 1,
+    borderColor: "rgba(59, 130, 246, 0.45)",
   },
   messageText: {
     fontSize: 16,
@@ -587,11 +1020,50 @@ const styles = StyleSheet.create({
   otherMessageText: {
     color: "#000",
   },
+  replySnippet: {
+    borderLeftWidth: 3,
+    paddingLeft: 10,
+    borderRadius: 10,
+    marginBottom: 8,
+    gap: 2,
+  },
+  replySnippetOwn: {
+    borderLeftColor: "rgba(255, 255, 255, 0.7)",
+    backgroundColor: "rgba(255, 255, 255, 0.16)",
+  },
+  replySnippetOther: {
+    borderLeftColor: "#93C5FD",
+    backgroundColor: "rgba(59, 130, 246, 0.08)",
+  },
+  replySnippetAuthor: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1F2937",
+  },
+  replySnippetAuthorOwn: {
+    color: "#0F172A",
+  },
+  replySnippetMessage: {
+    fontSize: 13,
+    color: "#4B5563",
+  },
+  replySnippetMessageOwn: {
+    color: "#1F2937",
+  },
   timestamp: {
     fontSize: 11,
     color: "#999",
-    marginTop: 4,
-    marginHorizontal: 10,
+    marginTop: 6,
+  },
+  timestampHidden: {
+    opacity: 0,
+    height: 0,
+  },
+  ownTimestamp: {
+    alignSelf: "flex-end",
+  },
+  otherTimestamp: {
+    alignSelf: "flex-start",
   },
   attachmentImage: {
     width: 220,
@@ -756,5 +1228,160 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     color: "#000",
+  },
+  replyPreview: {
+    marginHorizontal: 15,
+    marginBottom: 4,
+    backgroundColor: "#E0EDFF",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  replyPreviewIndicator: {
+    width: 4,
+    backgroundColor: "#3B82F6",
+    borderRadius: 999,
+    alignSelf: "stretch",
+  },
+  replyPreviewText: {
+    flex: 1,
+    gap: 2,
+  },
+  replyPreviewLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#1D4ED8",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  replyPreviewMessage: {
+    fontSize: 14,
+    color: "#0F172A",
+  },
+  replyPreviewClose: {
+    padding: 4,
+  },
+  profileModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  profileModalContent: {
+    width: "100%",
+    borderRadius: 20,
+    backgroundColor: "#FFFFFF",
+    padding: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  profileModalClose: {
+    alignSelf: "flex-end",
+  },
+  profileModalHeader: {
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 20,
+  },
+  profileModalAvatarWrapper: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    overflow: "hidden",
+    backgroundColor: "#E2E8F0",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileModalAvatar: {
+    width: "100%",
+    height: "100%",
+  },
+  profileModalAvatarFallback: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: "#FDB515",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileModalInitials: {
+    fontSize: 32,
+    fontWeight: "700",
+    color: "#000",
+  },
+  profileModalName: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#0F172A",
+    textAlign: "center",
+  },
+  profileModalHandle: {
+    fontSize: 14,
+    color: "#475569",
+  },
+  profileModalDetails: {
+    gap: 14,
+  },
+  profileModalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  profileModalLabel: {
+    fontSize: 13,
+    color: "#64748B",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+  },
+  profileModalValue: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#1F2937",
+  },
+  profileConnectionGroup: {
+    gap: 8,
+  },
+  profileConnectionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#1E3561",
+    backgroundColor: "#15284B",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginTop: 8,
+    gap: 12,
+  },
+  profileConnectionIconWrapper: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#F77737",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  profileConnectionInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  profileConnectionHandle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+  profileConnectionSubtitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "rgba(255, 255, 255, 0.7)",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
   },
 });

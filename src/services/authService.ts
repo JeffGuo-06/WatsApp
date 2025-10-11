@@ -258,7 +258,12 @@ export const authService = {
   // Update profile
   updateProfile: async (
     userId: string,
-    updates: { name?: string; program?: string; year?: string }
+    updates: {
+      name?: string;
+      program?: string;
+      year?: string;
+      instagram?: string | null;
+    }
   ) => {
     const { data, error } = await supabase
       .from("profiles")

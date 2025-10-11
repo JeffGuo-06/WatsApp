@@ -11,6 +11,7 @@ interface Profile {
   avatar_url?: string;
   program?: string;
   year?: string;
+  instagram?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -32,6 +32,7 @@ CREATE TABLE public.messages (
   course_chat_id uuid,
   user_id uuid,
   content text NOT NULL,
+  reply_to_message_id uuid,
   attachment_url text,
   attachment_type text,
   attachment_name text,
@@ -39,7 +40,8 @@ CREATE TABLE public.messages (
   created_at timestamp without time zone DEFAULT now(),
   CONSTRAINT messages_pkey PRIMARY KEY (id),
   CONSTRAINT messages_course_chat_id_fkey FOREIGN KEY (course_chat_id) REFERENCES public.course_chats(id),
-  CONSTRAINT messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id)
+  CONSTRAINT messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.profiles(id),
+  CONSTRAINT messages_reply_to_message_id_fkey FOREIGN KEY (reply_to_message_id) REFERENCES public.messages(id)
 );
 CREATE TABLE public.profiles (
   id uuid NOT NULL,
@@ -48,6 +50,7 @@ CREATE TABLE public.profiles (
   name character varying NOT NULL,
   program character varying,
   year character varying,
+  instagram character varying,
   created_at timestamp without time zone DEFAULT now(),
   updated_at timestamp without time zone DEFAULT now(),
   avatar_url text,
