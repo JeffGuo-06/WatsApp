@@ -104,6 +104,7 @@ export default function CourseChat() {
   const [selectedMember, setSelectedMember] = useState<Message | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  const allowNewlineRef = useRef(false);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -377,6 +378,12 @@ export default function CourseChat() {
 
   const handleChangeText = (text: string) => {
     if (text.endsWith("\n")) {
+      if (allowNewlineRef.current) {
+        allowNewlineRef.current = false;
+        setNewMessage(text);
+        return;
+      }
+
       const sanitized = text.replace(/[\r\n]+$/, "");
       setNewMessage(sanitized);
       if (sanitized.trim().length > 0) {
@@ -385,6 +392,12 @@ export default function CourseChat() {
       return;
     }
     setNewMessage(text);
+  };
+
+  const handleKeyPress = (event: { nativeEvent: { key?: string; shiftKey?: boolean } }) => {
+    if (event.nativeEvent.key === "Enter" && event.nativeEvent.shiftKey) {
+      allowNewlineRef.current = true;
+    }
   };
 
   const renderMessage = ({ item, index }: { item: Message; index: number }) => {
@@ -714,6 +727,7 @@ export default function CourseChat() {
           placeholder="Type a message..."
           value={newMessage}
           onChangeText={handleChangeText}
+          onKeyPress={handleKeyPress}
           onSubmitEditing={() => sendMessage(null)}
           multiline
           maxLength={1000}
