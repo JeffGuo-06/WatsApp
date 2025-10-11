@@ -237,8 +237,9 @@ export default function CourseChat() {
     router.back();
   };
 
-  const sendMessage = async (overrideContent?: string) => {
-    const messageText = (overrideContent ?? newMessage).trim();
+  const sendMessage = async (overrideContent?: string | null) => {
+    const base = typeof overrideContent === "string" ? overrideContent : newMessage;
+    const messageText = base.trim();
     if (!messageText || !currentUserId || sending) return;
 
     setSending(true);
@@ -713,7 +714,7 @@ export default function CourseChat() {
           placeholder="Type a message..."
           value={newMessage}
           onChangeText={handleChangeText}
-          onSubmitEditing={() => sendMessage()}
+          onSubmitEditing={() => sendMessage(null)}
           multiline
           maxLength={1000}
           returnKeyType="send"
@@ -723,7 +724,7 @@ export default function CourseChat() {
             styles.sendButton,
             (!newMessage.trim() || sending || uploadingAttachment) && styles.sendButtonDisabled,
           ]}
-          onPress={sendMessage}
+          onPress={() => sendMessage(null)}
           disabled={!newMessage.trim() || sending || uploadingAttachment}
         >
           {sending ? (
