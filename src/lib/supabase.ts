@@ -47,7 +47,8 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: Platform.OS === "web", // Enable URL detection for web (magic links)
+    detectSessionInUrl: false, // Disable to prevent hanging on page refresh
+    flowType: 'pkce', // Use PKCE flow for better web security
   },
 });
 
