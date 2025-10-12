@@ -69,91 +69,89 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     let mounted = true;
+    let initialAuthResolved = false;
 
-    const initializeAuth = async () => {
-      try {
-        const startTime = performance.now();
-        console.log("[AuthContext] Starting session restoration...");
-
-        // Add a timeout wrapper to prevent infinite hanging
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => {
-            reject(new Error("getSession() timeout after 5 seconds"));
-          }, 5000);
-        });
-
-        console.log("[AuthContext] Calling supabase.auth.getSession()...");
-        const result = await Promise.race([sessionPromise, timeoutPromise]);
-        console.log("[AuthContext] getSession() returned");
-
-        const { data: { session }, error } = result;
-
-        const duration = performance.now() - startTime;
-        console.log(`[AuthContext] getSession() completed in ${duration.toFixed(0)}ms`);
-
-        if (error) {
-          console.error("[AuthContext] Session restoration error:", error);
-          throw error;
-        }
-
-        console.log("[AuthContext] Session restored:", session ? "authenticated" : "no session");
-
-        if (!mounted) return;
-
-        setSession(session);
-        setUser(session?.user ?? null);
-
-        if (session?.user) {
-          console.log("[AuthContext] User found, fetching profile...");
-          // Fetch profile but don't block on it
-          fetchProfile(session.user.id).catch(err => {
-            console.error("[AuthContext] Profile fetch failed (non-blocking):", err);
-          });
-
-          // Track session but don't block on it
-          authService.trackSession().catch(err => {
-            console.error("[AuthContext] Session tracking failed (non-blocking):", err);
-          });
-        }
-      } catch (error) {
-        console.error("[AuthContext] Session restoration failed:", error);
-        // On error, ensure we're logged out
-        setSession(null);
-        setUser(null);
-        setProfile(null);
-      } finally {
-        if (mounted) {
-          console.log("[AuthContext] Setting loading to false");
-          setLoading(false);
-        }
-      }
-    };
-
-    initializeAuth();
-
-    // Listen for auth changes
+    // Listen for auth changes - this is the PRIMARY auth mechanism
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       console.log("[AuthContext] Auth state changed:", _event, session ? "authenticated" : "no session");
       if (!mounted) return;
 
+      // Mark that initial auth has been handled by the listener
+      if (!initialAuthResolved) {
+        initialAuthResolved = true;
+        console.log("[AuthContext] Initial auth resolved via listener");
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
+
       if (session?.user) {
-        await fetchProfile(session.user.id);
-        // Track session on login/auth change
-        try {
-          await authService.trackSession();
-        } catch (error) {
-          console.error("Failed to track session on auth change:", error);
-        }
+        // Fetch profile but don't block
+        fetchProfile(session.user.id).catch(err => {
+          console.error("[AuthContext] Profile fetch failed:", err);
+        });
+
+        // Track session but don't block
+        authService.trackSession().catch(err => {
+          console.error("[AuthContext] Session tracking failed:", err);
+        });
       } else {
         setProfile(null);
       }
+
       setLoading(false);
     });
+
+    // Try getSession() as backup in case listener doesn't fire immediately
+    // This handles edge cases but isn't critical
+    const tryGetSession = async () => {
+      try {
+        console.log("[AuthContext] Attempting getSession() as backup...");
+
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("getSession timeout")), 2000);
+        });
+
+        const { data: { session } } = await Promise.race([
+          supabase.auth.getSession(),
+          timeoutPromise
+        ]);
+
+        console.log("[AuthContext] getSession() succeeded");
+
+        // Only use this if the listener hasn't fired yet
+        if (!initialAuthResolved && mounted) {
+          console.log("[AuthContext] Using getSession() result (listener didn't fire)");
+          initialAuthResolved = true;
+          setSession(session);
+          setUser(session?.user ?? null);
+
+          if (session?.user) {
+            fetchProfile(session.user.id).catch(() => {});
+            authService.trackSession().catch(() => {});
+          }
+
+          setLoading(false);
+        }
+      } catch (error) {
+        console.log("[AuthContext] getSession() failed/timed out (expected, using listener instead)");
+
+        // If listener hasn't fired after 3 seconds total, assume no session
+        if (!initialAuthResolved && mounted) {
+          setTimeout(() => {
+            if (!initialAuthResolved && mounted) {
+              console.log("[AuthContext] No auth detected, stopping loading");
+              initialAuthResolved = true;
+              setLoading(false);
+            }
+          }, 1000);
+        }
+      }
+    };
+
+    tryGetSession();
 
     return () => {
       mounted = false;
