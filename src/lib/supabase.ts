@@ -5,11 +5,19 @@ import { Platform } from "react-native";
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!;
 
+console.log("[Supabase] Initializing client", {
+  hasUrl: !!supabaseUrl,
+  hasKey: !!supabaseAnonKey,
+  url: supabaseUrl?.substring(0, 30) + "...",
+});
+
 const projectReference = supabaseUrl
   .replace(/^https?:\/\//, "")
   .split(".")[0];
 
 const authStorageKey = `sb-${projectReference}-auth-token`;
+
+console.log("[Supabase] Storage key:", authStorageKey);
 
 const ExpoSecureStoreAdapter = {
   getItem: (key: string) => SecureStore.getItemAsync(key),

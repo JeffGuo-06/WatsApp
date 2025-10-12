@@ -75,7 +75,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         const startTime = performance.now();
         console.log("[AuthContext] Starting session restoration...");
 
-        const { data: { session }, error } = await supabase.auth.getSession();
+        // Add a timeout wrapper to prevent infinite hanging
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            reject(new Error("getSession() timeout after 5 seconds"));
+          }, 5000);
+        });
+
+        console.log("[AuthContext] Calling supabase.auth.getSession()...");
+        const result = await Promise.race([sessionPromise, timeoutPromise]);
+        console.log("[AuthContext] getSession() returned");
+
+        const { data: { session }, error } = result;
 
         const duration = performance.now() - startTime;
         console.log(`[AuthContext] getSession() completed in ${duration.toFixed(0)}ms`);
