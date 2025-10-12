@@ -12,10 +12,18 @@
       }
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": ""
+      }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": ""
+      }
     }
   },
   "submit": {

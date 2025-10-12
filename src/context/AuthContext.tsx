@@ -68,26 +68,62 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   useEffect(() => {
-    // Check active session
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        await fetchProfile(session.user.id);
-        // Track session on app start if authenticated
-        try {
-          await authService.trackSession();
-        } catch (error) {
-          console.error("Failed to track session on startup:", error);
+    let mounted = true;
+    let sessionTimeout: NodeJS.Timeout;
+
+    const initializeAuth = async () => {
+      try {
+        // Add timeout protection for session restoration
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => {
+          sessionTimeout = setTimeout(() => {
+            reject(new Error("Session restoration timeout"));
+          }, 10000); // 10 second timeout
+        });
+
+        const { data: { session } } = await Promise.race([
+          sessionPromise,
+          timeoutPromise
+        ]) as Awaited<ReturnType<typeof supabase.auth.getSession>>;
+
+        clearTimeout(sessionTimeout);
+
+        if (!mounted) return;
+
+        setSession(session);
+        setUser(session?.user ?? null);
+
+        if (session?.user) {
+          await fetchProfile(session.user.id);
+          // Track session on app start if authenticated
+          try {
+            await authService.trackSession();
+          } catch (error) {
+            console.error("Failed to track session on startup:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Session restoration failed:", error);
+        // Clear potentially corrupted session data
+        if (error instanceof Error && error.message === "Session restoration timeout") {
+          console.warn("Session timeout - clearing cached session");
+          await supabase.auth.signOut({ scope: "local" });
+        }
+      } finally {
+        if (mounted) {
+          setLoading(false);
         }
       }
-      setLoading(false);
-    });
+    };
+
+    initializeAuth();
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!mounted) return;
+
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
@@ -104,7 +140,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      mounted = false;
+      clearTimeout(sessionTimeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Periodically update session activity (every 10 minutes)
