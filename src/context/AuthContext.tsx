@@ -69,24 +69,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     let mounted = true;
-    let sessionTimeout: NodeJS.Timeout;
 
     const initializeAuth = async () => {
       try {
-        // Add timeout protection for session restoration
-        const sessionPromise = supabase.auth.getSession();
-        const timeoutPromise = new Promise((_, reject) => {
-          sessionTimeout = setTimeout(() => {
-            reject(new Error("Session restoration timeout"));
-          }, 10000); // 10 second timeout
-        });
+        const startTime = performance.now();
+        console.log("[AuthContext] Starting session restoration...");
 
-        const { data: { session } } = await Promise.race([
-          sessionPromise,
-          timeoutPromise
-        ]) as Awaited<ReturnType<typeof supabase.auth.getSession>>;
+        const { data: { session }, error } = await supabase.auth.getSession();
 
-        clearTimeout(sessionTimeout);
+        const duration = performance.now() - startTime;
+        console.log(`[AuthContext] getSession() completed in ${duration.toFixed(0)}ms`);
+
+        if (error) {
+          console.error("[AuthContext] Session restoration error:", error);
+          throw error;
+        }
+
+        console.log("[AuthContext] Session restored:", session ? "authenticated" : "no session");
 
         if (!mounted) return;
 
@@ -94,23 +93,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setUser(session?.user ?? null);
 
         if (session?.user) {
-          await fetchProfile(session.user.id);
-          // Track session on app start if authenticated
-          try {
-            await authService.trackSession();
-          } catch (error) {
-            console.error("Failed to track session on startup:", error);
-          }
+          console.log("[AuthContext] User found, fetching profile...");
+          // Fetch profile but don't block on it
+          fetchProfile(session.user.id).catch(err => {
+            console.error("[AuthContext] Profile fetch failed (non-blocking):", err);
+          });
+
+          // Track session but don't block on it
+          authService.trackSession().catch(err => {
+            console.error("[AuthContext] Session tracking failed (non-blocking):", err);
+          });
         }
       } catch (error) {
-        console.error("Session restoration failed:", error);
-        // Clear potentially corrupted session data
-        if (error instanceof Error && error.message === "Session restoration timeout") {
-          console.warn("Session timeout - clearing cached session");
-          await supabase.auth.signOut({ scope: "local" });
-        }
+        console.error("[AuthContext] Session restoration failed:", error);
+        // On error, ensure we're logged out
+        setSession(null);
+        setUser(null);
+        setProfile(null);
       } finally {
         if (mounted) {
+          console.log("[AuthContext] Setting loading to false");
           setLoading(false);
         }
       }
@@ -122,6 +124,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      console.log("[AuthContext] Auth state changed:", _event, session ? "authenticated" : "no session");
       if (!mounted) return;
 
       setSession(session);
@@ -142,7 +145,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       mounted = false;
-      clearTimeout(sessionTimeout);
       subscription.unsubscribe();
     };
   }, []);

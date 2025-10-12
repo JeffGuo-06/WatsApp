@@ -20,22 +20,39 @@ const ExpoSecureStoreAdapter = {
 const createWebStorage = () => {
   return {
     getItem: async (key: string) => {
-      if (typeof window === "undefined") {
+      try {
+        if (typeof window === "undefined") {
+          return null;
+        }
+        const value = window.localStorage.getItem(key);
+        console.log(`[Storage] getItem ${key}:`, value ? "found" : "not found");
+        return value;
+      } catch (error) {
+        console.error(`[Storage] getItem error for ${key}:`, error);
         return null;
       }
-      return window.localStorage.getItem(key);
     },
     setItem: async (key: string, value: string) => {
-      if (typeof window === "undefined") {
-        return;
+      try {
+        if (typeof window === "undefined") {
+          return;
+        }
+        window.localStorage.setItem(key, value);
+        console.log(`[Storage] setItem ${key}: saved`);
+      } catch (error) {
+        console.error(`[Storage] setItem error for ${key}:`, error);
       }
-      window.localStorage.setItem(key, value);
     },
     removeItem: async (key: string) => {
-      if (typeof window === "undefined") {
-        return;
+      try {
+        if (typeof window === "undefined") {
+          return;
+        }
+        window.localStorage.removeItem(key);
+        console.log(`[Storage] removeItem ${key}: removed`);
+      } catch (error) {
+        console.error(`[Storage] removeItem error for ${key}:`, error);
       }
-      window.localStorage.removeItem(key);
     },
   };
 };
