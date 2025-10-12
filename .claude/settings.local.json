@@ -3,7 +3,8 @@
     "allow": [
       "WebFetch(domain:classes.uwaterloo.ca)",
       "Bash(git commit:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebFetch(domain:supabase.com)"
     ],
     "deny": [],
     "ask": []
