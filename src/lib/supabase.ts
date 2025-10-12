@@ -64,16 +64,27 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     storage,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false, // Disable to prevent hanging on page refresh
-    flowType: 'pkce', // Use PKCE flow for better web security
+    detectSessionInUrl: false, // Disable - we use OTP, not URL redirects
+    // Don't set flowType - let Supabase use default implicit flow for OTP
   },
 });
+
+// Clean up legacy PKCE code verifier on web (one-time migration)
+if (Platform.OS === "web" && typeof window !== "undefined") {
+  const codeVerifierKey = `${authStorageKey}-code-verifier`;
+  if (window.localStorage.getItem(codeVerifierKey)) {
+    console.warn("[Supabase] Removing legacy PKCE code-verifier");
+    window.localStorage.removeItem(codeVerifierKey);
+  }
+}
 
 export const clearSupabaseSession = async () => {
   try {
     if (Platform.OS === "web") {
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(authStorageKey);
+        // Also remove code verifier if it exists
+        window.localStorage.removeItem(`${authStorageKey}-code-verifier`);
       }
       return;
     }
