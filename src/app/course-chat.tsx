@@ -24,6 +24,8 @@ import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
+import { chatReadStorage } from "@/utils/chatReadStorage";
+import { useIsFocused } from "@react-navigation/native";
 
 interface Message {
   id: string;
@@ -91,6 +93,13 @@ const formatInstagramHandle = (value?: string | null) => {
 export default function CourseChat() {
   const params = useLocalSearchParams();
   const { courseChatId, courseCode, courseTitle, courseId, showJoinPrompt } = params;
+  const normalizedCourseChatId =
+    typeof courseChatId === "string"
+      ? courseChatId
+      : Array.isArray(courseChatId)
+        ? courseChatId[0]
+        : undefined;
+  const isFocused = useIsFocused();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
@@ -148,7 +157,7 @@ export default function CourseChat() {
   );
 
   const initializeChat = useCallback(async () => {
-    if (!courseChatId) {
+    if (!normalizedCourseChatId) {
       setLoading(false);
       return;
     }
@@ -168,7 +177,7 @@ export default function CourseChat() {
 
       // Load initial messages (will be empty if user hasn't joined yet, but that's ok)
       try {
-        const initialMessages = await chatService.getCourseMessages(courseChatId as string);
+        const initialMessages = await chatService.getCourseMessages(normalizedCourseChatId);
         setMessages(initialMessages);
       } catch {
         // If RLS blocks access (not enrolled), messages will be empty
@@ -177,7 +186,7 @@ export default function CourseChat() {
 
       // Subscribe to new messages
       channelRef.current = chatService.subscribeToCourseMessages(
-        courseChatId as string,
+        normalizedCourseChatId,
         handleNewMessage
       );
     } catch (error) {
@@ -185,7 +194,7 @@ export default function CourseChat() {
     } finally {
       setLoading(false);
     }
-  }, [courseChatId, handleNewMessage]);
+  }, [normalizedCourseChatId, handleNewMessage]);
 
   useEffect(() => {
     initializeChat();
@@ -199,8 +208,24 @@ export default function CourseChat() {
     };
   }, [initializeChat]);
 
+  useEffect(() => {
+    if (!isFocused || !normalizedCourseChatId) {
+      return;
+    }
+
+    const updateLastRead = async () => {
+      const latestTimestamp =
+        messages.length > 0
+          ? messages[messages.length - 1].created_at
+          : new Date().toISOString();
+      await chatReadStorage.setLastReadAt(normalizedCourseChatId, latestTimestamp);
+    };
+
+    updateLastRead();
+  }, [isFocused, normalizedCourseChatId, messages]);
+
   const handleConfirmJoin = async () => {
-    if (!currentUserId || !courseId) return;
+    if (!currentUserId || !courseId || !normalizedCourseChatId) return;
 
     setJoining(true);
     try {
@@ -220,7 +245,7 @@ export default function CourseChat() {
       setShowModal(false);
 
       // Reload messages now that user is enrolled
-      const initialMessages = await chatService.getCourseMessages(courseChatId as string);
+      const initialMessages = await chatService.getCourseMessages(normalizedCourseChatId);
       setMessages(initialMessages);
 
       // Show success snackbar
@@ -241,11 +266,11 @@ export default function CourseChat() {
   const sendMessage = async (overrideContent?: string | null) => {
     const base = typeof overrideContent === "string" ? overrideContent : newMessage;
     const messageText = base.trim();
-    if (!messageText || !currentUserId || sending) return;
+    if (!messageText || !currentUserId || sending || !normalizedCourseChatId) return;
 
     setSending(true);
     try {
-      await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
+      await chatService.sendCourseMessage(normalizedCourseChatId, currentUserId, {
         content: messageText,
         replyToMessageId: replyTarget?.id ?? null,
       });
@@ -270,7 +295,7 @@ export default function CourseChat() {
     mimeType?: string | null;
     name?: string | null;
   }) => {
-    if (!currentUserId || !courseChatId) {
+    if (!currentUserId || !normalizedCourseChatId) {
       Alert.alert("Not ready", "We couldn't prepare the upload yet. Please try again.");
       return;
     }
@@ -279,13 +304,13 @@ export default function CourseChat() {
     try {
       const uploaded = await chatService.uploadChatAttachment({
         userId: currentUserId,
-        courseChatId: courseChatId as string,
+        courseChatId: normalizedCourseChatId,
         uri: params.uri,
         mimeType: params.mimeType,
         name: params.name,
       });
 
-      await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
+      await chatService.sendCourseMessage(normalizedCourseChatId, currentUserId, {
         content: "",
         attachmentUrl: uploaded.publicUrl,
         attachmentType: uploaded.contentType,
@@ -612,17 +637,18 @@ export default function CourseChat() {
         </View>
         <TouchableOpacity
           style={styles.menuButton}
-          onPress={() =>
+          onPress={() => {
+            if (!normalizedCourseChatId) return;
             router.push({
               pathname: "/course-details",
               params: {
                 courseId: courseId as string,
                 courseCode: courseCode as string,
                 courseTitle: courseTitle as string,
-                courseChatId: courseChatId as string,
+                courseChatId: normalizedCourseChatId,
               },
-            })
-          }
+            });
+          }}
         >
           <IconSymbol name="ellipsis.circle" size={24} color="#000" />
         </TouchableOpacity>

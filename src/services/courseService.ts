@@ -130,7 +130,13 @@ export const courseService = {
   getUserCourses: async (userId: string) => {
     const { data, error } = await supabase
       .from("user_courses")
-      .select("*, courses(*)")
+      .select(`
+        *,
+        courses (
+          *,
+          course_chats ( id )
+        )
+      `)
       .eq("user_id", userId);
 
     if (error) throw error;
