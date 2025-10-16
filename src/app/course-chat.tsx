@@ -13,6 +13,7 @@ import {
   Alert,
   Linking,
   Pressable,
+  Keyboard,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -104,6 +105,7 @@ export default function CourseChat() {
   const [selectedMember, setSelectedMember] = useState<Message | null>(null);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const allowNewlineRef = useRef(false);
 
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -198,6 +200,22 @@ export default function CourseChat() {
       }
     };
   }, [initializeChat]);
+
+  useEffect(() => {
+    const keyboardWillShow = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      () => setIsKeyboardVisible(true)
+    );
+    const keyboardWillHide = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setIsKeyboardVisible(false)
+    );
+
+    return () => {
+      keyboardWillShow.remove();
+      keyboardWillHide.remove();
+    };
+  }, []);
 
   const handleConfirmJoin = async () => {
     if (!currentUserId || !courseId) return;
@@ -600,7 +618,7 @@ export default function CourseChat() {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
@@ -705,7 +723,10 @@ export default function CourseChat() {
         </View>
       )}
 
-      <View style={styles.inputContainer}>
+      <View style={[
+        styles.inputContainer,
+        !isKeyboardVisible && styles.inputContainerWithPadding,
+      ]}>
         <View style={styles.inputActions}>
           <TouchableOpacity
             style={[
@@ -1117,11 +1138,16 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: "row",
-    padding: 10,
+    paddingTop: 10,
+    paddingHorizontal: 10,
+    paddingBottom: 10,
     backgroundColor: "#fff",
     borderTopWidth: 1,
     borderTopColor: "#ddd",
     alignItems: "flex-end",
+  },
+  inputContainerWithPadding: {
+    paddingBottom: 30,
   },
   inputActions: {
     flexDirection: "row",
