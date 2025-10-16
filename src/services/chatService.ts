@@ -55,12 +55,25 @@ const generateFileName = (extension: string) => {
   return `${uniquePart}.${safeExtension}`;
 };
 
-const fetchFileBlob = async (uri: string) => {
+const fetchFileAsBase64 = async (uri: string): Promise<string> => {
   const response = await fetch(uri);
   if (!response.ok) {
     throw new Error("Failed to read file for upload");
   }
-  return response.blob();
+
+  // Convert to base64 for React Native compatibility
+  const blob = await response.blob();
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      // Remove the data URL prefix (e.g., "data:image/png;base64,")
+      const base64Data = base64.split(',')[1];
+      resolve(base64Data);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
 };
 
 export const chatService = {
@@ -121,15 +134,22 @@ export const chatService = {
   uploadChatAttachment: async (
     options: UploadAttachmentOptions
   ): Promise<UploadedAttachment> => {
-    const blob = await fetchFileBlob(options.uri);
+    const base64Data = await fetchFileAsBase64(options.uri);
     const extension = getExtension(options.mimeType, options.name);
     const fileName = generateFileName(extension);
     const filePath = `${options.courseChatId}/${options.userId}/${fileName}`;
     const contentType = options.mimeType || "application/octet-stream";
 
+    // Convert base64 to arraybuffer for upload
+    const binaryString = atob(base64Data);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
     const { error: uploadError } = await supabase.storage
       .from(ATTACHMENT_BUCKET)
-      .upload(filePath, blob, {
+      .upload(filePath, bytes, {
         upsert: false,
         contentType,
         cacheControl: "3600",
@@ -152,7 +172,7 @@ export const chatService = {
       path: filePath,
       fileName: options.name || fileName,
       contentType,
-      size: blob.size,
+      size: bytes.length,
     };
   },
 
