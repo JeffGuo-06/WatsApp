@@ -573,15 +573,23 @@ export default function ProfileScreen() {
               ]}
             >
               <View style={styles.connectionHeader}>
-                <View
+                <TouchableOpacity
                   style={[
                     styles.connectionIcon,
                     { backgroundColor: isDark ? "#E1306C" : "#F77737" },
                   ]}
+                  onPress={handleOpenInstagram}
+                  activeOpacity={0.7}
+                  disabled={editingInstagram}
                 >
                   <Ionicons name="logo-instagram" size={24} color="#FFFFFF" />
-                </View>
-                <View style={styles.connectionText}>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.connectionText}
+                  onPress={handleOpenInstagram}
+                  activeOpacity={0.7}
+                  disabled={editingInstagram}
+                >
                   <Text style={[styles.connectionHandle, { color: surfaceText }]}>
                     {instagramDisplay}
                   </Text>
@@ -590,41 +598,15 @@ export default function ProfileScreen() {
                   >
                     Instagram
                   </Text>
-                </View>
+                </TouchableOpacity>
                 {!editingInstagram && (
-                  <View style={styles.connectionButtons}>
-                    <TouchableOpacity
-                      style={[
-                        styles.connectionChip,
-                        {
-                          borderColor: isDark ? "#2D7FF9" : "#BFDBFE",
-                          backgroundColor: isDark ? "#0F2656" : "#1E3A8A",
-                        },
-                      ]}
-                      onPress={hasInstagram ? handleOpenInstagram : handleEditInstagram}
-                    >
-                      <Text style={styles.connectionChipText}>
-                        {hasInstagram ? "View" : "Add"}
-                      </Text>
-                    </TouchableOpacity>
-                    {hasInstagram && (
-                      <TouchableOpacity
-                        style={[
-                          styles.connectionChip,
-                          styles.connectionChipSecondary,
-                          {
-                            borderColor: isDark ? "#3C3C3C" : "#1E3561",
-                            backgroundColor: isDark
-                              ? "rgba(255, 255, 255, 0.05)"
-                              : "rgba(255, 255, 255, 0.18)",
-                          },
-                        ]}
-                        onPress={handleEditInstagram}
-                      >
-                        <Text style={styles.connectionChipText}>Edit</Text>
-                      </TouchableOpacity>
-                    )}
-                  </View>
+                  <TouchableOpacity
+                    style={styles.connectionEditButton}
+                    onPress={handleEditInstagram}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="pencil" size={20} color={surfaceText} />
+                  </TouchableOpacity>
                 )}
               </View>
               {editingInstagram && (
@@ -880,7 +862,7 @@ const styles = StyleSheet.create({
   connectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
+    gap: 12,
   },
   connectionIcon: {
     width: 48,
@@ -888,6 +870,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
+    flexShrink: 0,
   },
   connectionText: {
     flex: 1,
@@ -903,23 +886,13 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     letterSpacing: 0.8,
   },
-  connectionButtons: {
-    flexDirection: "row",
-    gap: 8,
-  },
-  connectionChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  connectionChipSecondary: {
-    backgroundColor: "transparent",
-  },
-  connectionChipText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    fontWeight: "600",
+  connectionEditButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
   },
   connectionEditor: {
     gap: 12,
