@@ -14,6 +14,8 @@ import {
   Linking,
   Pressable,
   Keyboard,
+  Animated,
+  SafeAreaView,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
@@ -55,6 +57,14 @@ interface Message {
       avatar_url?: string | null;
     } | null;
   } | null;
+}
+
+interface PendingAttachment {
+  id: string;
+  uri: string;
+  mimeType: string;
+  name: string;
+  type: "image" | "file";
 }
 
 const getInitials = (name?: string) => {
@@ -106,7 +116,12 @@ export default function CourseChat() {
   const [profileModalVisible, setProfileModalVisible] = useState(false);
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [showAttachmentMenu, setShowAttachmentMenu] = useState(false);
+  const [isAnimating, setIsAnimating] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const allowNewlineRef = useRef(false);
+  const slideAnim = useRef(new Animated.Value(0)).current;
 
   const channelRef = useRef<RealtimeChannel | null>(null);
   const flatListRef = useRef<FlatList>(null);
@@ -217,6 +232,26 @@ export default function CourseChat() {
     };
   }, []);
 
+  useEffect(() => {
+    if (showAttachmentMenu) {
+      setIsAnimating(true);
+      Animated.spring(slideAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 120,
+        friction: 12,
+      }).start();
+    } else if (isAnimating) {
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }).start(() => {
+        setIsAnimating(false);
+      });
+    }
+  }, [showAttachmentMenu, slideAnim, isAnimating]);
+
   const handleConfirmJoin = async () => {
     if (!currentUserId || !courseId) return;
 
@@ -259,18 +294,49 @@ export default function CourseChat() {
   const sendMessage = async (overrideContent?: string | null) => {
     const base = typeof overrideContent === "string" ? overrideContent : newMessage;
     const messageText = base.trim();
-    if (!messageText || !currentUserId || sending) return;
+    const hasAttachments = pendingAttachments.length > 0;
+
+    if (!messageText && !hasAttachments) return;
+    if (!currentUserId || sending) return;
 
     setSending(true);
     try {
-      await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
-        content: messageText,
-        replyToMessageId: replyTarget?.id ?? null,
-      });
+      // If there are attachments, upload and send each one
+      if (hasAttachments) {
+        for (const attachment of pendingAttachments) {
+          const uploaded = await chatService.uploadChatAttachment({
+            userId: currentUserId,
+            courseChatId: courseChatId as string,
+            uri: attachment.uri,
+            mimeType: attachment.mimeType,
+            name: attachment.name,
+          });
+
+          await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
+            content: "", // Send attachments separately
+            attachmentUrl: uploaded.publicUrl,
+            attachmentType: uploaded.contentType,
+            attachmentName: uploaded.fileName,
+            attachmentSize: uploaded.size,
+            replyToMessageId: replyTarget?.id ?? null,
+          });
+        }
+        setPendingAttachments([]);
+      }
+
+      // Send text message if there's any text
+      if (messageText) {
+        await chatService.sendCourseMessage(courseChatId as string, currentUserId, {
+          content: messageText,
+          replyToMessageId: replyTarget?.id ?? null,
+        });
+      }
+
       setNewMessage("");
       cancelReply();
     } catch (error) {
       console.error("Error sending message:", error);
+      Alert.alert("Failed to send", "We couldn't send your message. Please try again.");
     } finally {
       setSending(false);
     }
@@ -320,8 +386,8 @@ export default function CourseChat() {
     }
   };
 
-  const handleAttachmentPress = async () => {
-    if (uploadingAttachment || sending) return;
+  const handlePickFromFiles = async () => {
+    setShowAttachmentMenu(false);
 
     const result = await DocumentPicker.getDocumentAsync({
       type: ["application/pdf", "image/*"],
@@ -349,11 +415,72 @@ export default function CourseChat() {
       return;
     }
 
-    await uploadAndSendAttachment({
+    // Add to pending attachments queue
+    const newAttachment: PendingAttachment = {
+      id: `${Date.now()}-${Math.random()}`,
       uri: asset.uri,
       mimeType,
       name,
+      type: mimeType.startsWith("image/") ? "image" : "file",
+    };
+    setPendingAttachments((prev) => [...prev, newAttachment]);
+  };
+
+  const handlePickFromPhotos = async () => {
+    setShowAttachmentMenu(false);
+
+    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permissionResult.granted) {
+      Alert.alert("Permission required", "We need permission to access your photos.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.8,
     });
+
+    if (result.canceled) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    if (!asset || !asset.uri) {
+      Alert.alert("Selection failed", "We couldn't read that photo. Please try again.");
+      return;
+    }
+
+    const mimeType = asset.mimeType || asset.uri.match(/\.png$/i) ? "image/png" : "image/jpeg";
+    const name = asset.fileName || asset.uri.split("/").pop() || "image.jpg";
+
+    // Add to pending attachments queue
+    const newAttachment: PendingAttachment = {
+      id: `${Date.now()}-${Math.random()}`,
+      uri: asset.uri,
+      mimeType,
+      name,
+      type: "image",
+    };
+    setPendingAttachments((prev) => [...prev, newAttachment]);
+  };
+
+  const handleAttachmentPress = () => {
+    if (uploadingAttachment || sending) return;
+
+    // On desktop/web, go straight to file picker
+    if (Platform.OS === "web" || Platform.OS === "macos" || Platform.OS === "windows") {
+      handlePickFromFiles();
+      return;
+    }
+
+    // On mobile, show the menu
+    setShowAttachmentMenu(true);
+  };
+
+  const removeAttachment = (id: string) => {
+    setPendingAttachments((prev) => prev.filter((att) => att.id !== id));
   };
 
   const formatFileSize = (bytes?: number | null) => {
@@ -543,7 +670,7 @@ export default function CourseChat() {
               item.attachment_type?.startsWith("image/") ? (
                 <TouchableOpacity
                   activeOpacity={0.85}
-                  onPress={() => handleOpenAttachment(item.attachment_url!)}
+                  onPress={() => setImagePreviewUrl(item.attachment_url!)}
                 >
                   <Image
                     source={{ uri: item.attachment_url }}
@@ -552,6 +679,7 @@ export default function CourseChat() {
                       hasText ? styles.attachmentImageWithText : null,
                     ]}
                     contentFit="cover"
+                    transition={200}
                   />
                 </TouchableOpacity>
               ) : (
@@ -562,17 +690,10 @@ export default function CourseChat() {
                   ]}
                   onPress={() => handleOpenAttachment(item.attachment_url!)}
                 >
-                  <IconSymbol name="doc.richtext" size={22} color="#000" />
-                  <View style={styles.attachmentMeta}>
-                    <Text style={styles.attachmentName} numberOfLines={1}>
-                      {item.attachment_name || "Attachment"}
-                    </Text>
-                    {item.attachment_size ? (
-                      <Text style={styles.attachmentSize}>
-                        {formatFileSize(item.attachment_size)}
-                      </Text>
-                    ) : null}
-                  </View>
+                  <IconSymbol name="doc.richtext" size={28} color="#3B82F6" />
+                  <Text style={styles.attachmentName} numberOfLines={1}>
+                    {item.attachment_name || "Attachment"}
+                  </Text>
                 </TouchableOpacity>
               )
             ) : null}
@@ -723,25 +844,107 @@ export default function CourseChat() {
         </View>
       )}
 
+      {pendingAttachments.length > 0 && (
+        <View style={styles.attachmentPreviewContainer}>
+          <FlatList
+            data={pendingAttachments}
+            horizontal
+            keyExtractor={(item) => item.id}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.attachmentPreviewList}
+            renderItem={({ item }) => (
+              <View style={styles.attachmentPreviewItem}>
+                {item.type === "image" ? (
+                  <Image
+                    source={{ uri: item.uri }}
+                    style={styles.attachmentPreviewImage}
+                    contentFit="cover"
+                  />
+                ) : (
+                  <View style={styles.attachmentPreviewFile}>
+                    <Ionicons name="document-text" size={32} color="#3B82F6" />
+                  </View>
+                )}
+                <TouchableOpacity
+                  style={styles.attachmentPreviewRemove}
+                  onPress={() => removeAttachment(item.id)}
+                >
+                  <Ionicons name="close-circle" size={24} color="#EF4444" />
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+        </View>
+      )}
+
       <View style={[
         styles.inputContainer,
         !isKeyboardVisible && styles.inputContainerWithPadding,
       ]}>
         <View style={styles.inputActions}>
-          <TouchableOpacity
-            style={[
-              styles.attachmentButton,
-              (uploadingAttachment || sending) && styles.attachmentButtonDisabled,
-            ]}
-            onPress={handleAttachmentPress}
-            disabled={uploadingAttachment || sending}
-          >
-            {uploadingAttachment ? (
-              <ActivityIndicator size="small" color="#000" />
-            ) : (
-              <IconSymbol name="paperclip" size={20} color="#000" />
+          <View style={styles.attachmentButtonWrapper}>
+            <TouchableOpacity
+              style={[
+                styles.attachmentButton,
+                (uploadingAttachment || sending) && styles.attachmentButtonDisabled,
+              ]}
+              onPress={handleAttachmentPress}
+              disabled={uploadingAttachment || sending}
+            >
+              {uploadingAttachment ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : (
+                <IconSymbol name="paperclip" size={20} color="#000" />
+              )}
+            </TouchableOpacity>
+            {(showAttachmentMenu || isAnimating) && (
+              <>
+                <Pressable
+                  style={styles.attachmentMenuBackdrop}
+                  onPress={() => setShowAttachmentMenu(false)}
+                />
+                <Animated.View
+                  style={[
+                    styles.attachmentMenuPopup,
+                    {
+                      transform: [
+                        {
+                          translateX: slideAnim.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [-150, 0],
+                          }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <TouchableOpacity
+                    style={styles.attachmentMenuOption}
+                    activeOpacity={0.7}
+                    onPress={handlePickFromPhotos}
+                  >
+                    <View style={styles.attachmentMenuIconContainer}>
+                      <Ionicons name="images" size={22} color="#FDB515" />
+                    </View>
+                    <Text style={styles.attachmentMenuOptionTitle}>Photos</Text>
+                  </TouchableOpacity>
+
+                  <View style={styles.attachmentMenuDivider} />
+
+                  <TouchableOpacity
+                    style={styles.attachmentMenuOption}
+                    activeOpacity={0.7}
+                    onPress={handlePickFromFiles}
+                  >
+                    <View style={styles.attachmentMenuIconContainer}>
+                      <Ionicons name="document-text" size={22} color="#3B82F6" />
+                    </View>
+                    <Text style={styles.attachmentMenuOptionTitle}>Files</Text>
+                  </TouchableOpacity>
+                </Animated.View>
+              </>
             )}
-          </TouchableOpacity>
+          </View>
         </View>
         <TextInput
           style={styles.input}
@@ -757,10 +960,10 @@ export default function CourseChat() {
         <TouchableOpacity
           style={[
             styles.sendButton,
-            (!newMessage.trim() || sending || uploadingAttachment) && styles.sendButtonDisabled,
+            ((!newMessage.trim() && pendingAttachments.length === 0) || sending || uploadingAttachment) && styles.sendButtonDisabled,
           ]}
           onPress={() => sendMessage(null)}
-          disabled={!newMessage.trim() || sending || uploadingAttachment}
+          disabled={(!newMessage.trim() && pendingAttachments.length === 0) || sending || uploadingAttachment}
         >
           {sending ? (
             <ActivityIndicator size="small" color="#fff" />
@@ -879,6 +1082,27 @@ export default function CourseChat() {
             </View>
           </TouchableOpacity>
         </TouchableOpacity>
+      </Modal>
+
+      <Modal
+        visible={!!imagePreviewUrl}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setImagePreviewUrl(null)}
+      >
+        <SafeAreaView style={styles.imagePreviewModal}>
+          <TouchableOpacity
+            style={styles.imagePreviewClose}
+            onPress={() => setImagePreviewUrl(null)}
+          >
+            <Ionicons name="close" size={32} color="#FFFFFF" />
+          </TouchableOpacity>
+          <Image
+            source={{ uri: imagePreviewUrl || "" }}
+            style={styles.imagePreviewImage}
+            contentFit="contain"
+          />
+        </SafeAreaView>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -1091,6 +1315,8 @@ const styles = StyleSheet.create({
     height: 220,
     borderRadius: 12,
     backgroundColor: "#ccc",
+    borderWidth: 0.5,
+    borderColor: "#FDB515",
   },
   attachmentImageWithText: {
     marginBottom: 10,
@@ -1113,7 +1339,8 @@ const styles = StyleSheet.create({
   attachmentName: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#000",
+    color: "#1E40AF",
+    flexShrink: 1,
   },
   attachmentSize: {
     fontSize: 12,
@@ -1154,6 +1381,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     marginRight: 10,
+    zIndex: 10,
+    elevation: 10,
   },
   input: {
     flex: 1,
@@ -1172,9 +1401,14 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
+    zIndex: 10,
+    elevation: 10,
   },
   sendButtonDisabled: {
     backgroundColor: "#ccc",
+  },
+  attachmentButtonWrapper: {
+    position: "relative",
   },
   attachmentButton: {
     width: 40,
@@ -1409,5 +1643,125 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.7)",
     textTransform: "uppercase",
     letterSpacing: 0.8,
+  },
+  attachmentMenuBackdrop: {
+    position: "absolute",
+    top: -1000,
+    left: -1000,
+    right: -1000,
+    bottom: -1000,
+    zIndex: -1,
+  },
+  attachmentMenuPopup: {
+    position: "absolute",
+    bottom: 50,
+    left: -5,
+    width: 200,
+    backgroundColor: "#FFFFFF",
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 5,
+    zIndex: 0,
+    opacity: 1,
+    overflow: "hidden",
+  },
+  attachmentMenuOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  attachmentMenuIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  attachmentMenuOptionTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#0F172A",
+  },
+  attachmentMenuDivider: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginHorizontal: 20,
+  },
+  attachmentPreviewContainer: {
+    backgroundColor: "#fff",
+    borderTopWidth: 1,
+    borderTopColor: "#E5E5E5",
+    paddingVertical: 12,
+    overflow: "visible",
+  },
+  attachmentPreviewList: {
+    paddingHorizontal: 15,
+    gap: 12,
+    paddingTop: 8,
+  },
+  attachmentPreviewItem: {
+    position: "relative",
+    marginRight: 8,
+    overflow: "visible",
+  },
+  attachmentPreviewImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: "#E5E5E5",
+  },
+  attachmentPreviewFile: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+  },
+  attachmentPreviewRemove: {
+    position: "absolute",
+    top: -8,
+    right: -8,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 10,
+  },
+  imagePreviewModal: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.95)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 40,
+  },
+  imagePreviewClose: {
+    position: "absolute",
+    top: 60,
+    right: 20,
+    zIndex: 10,
+    padding: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    borderRadius: 20,
+  },
+  imagePreviewImage: {
+    width: "100%",
+    height: "100%",
+    maxWidth: "90%",
+    maxHeight: "80%",
   },
 });
