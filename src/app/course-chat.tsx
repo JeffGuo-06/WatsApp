@@ -1090,19 +1090,26 @@ export default function CourseChat() {
         animationType="fade"
         onRequestClose={() => setImagePreviewUrl(null)}
       >
-        <SafeAreaView style={styles.imagePreviewModal}>
-          <TouchableOpacity
-            style={styles.imagePreviewClose}
-            onPress={() => setImagePreviewUrl(null)}
-          >
-            <Ionicons name="close" size={32} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Image
-            source={{ uri: imagePreviewUrl || "" }}
-            style={styles.imagePreviewImage}
-            contentFit="contain"
-          />
-        </SafeAreaView>
+        <Pressable
+          style={styles.imagePreviewModal}
+          onPress={() => setImagePreviewUrl(null)}
+        >
+          <SafeAreaView style={styles.imagePreviewModalContent}>
+            <TouchableOpacity
+              style={styles.imagePreviewClose}
+              onPress={() => setImagePreviewUrl(null)}
+            >
+              <Ionicons name="close" size={32} color="#FFFFFF" />
+            </TouchableOpacity>
+            <View style={styles.imagePreviewImageWrapper}>
+              <Image
+                source={{ uri: imagePreviewUrl || "" }}
+                style={styles.imagePreviewImage}
+                contentFit="contain"
+              />
+            </View>
+          </SafeAreaView>
+        </Pressable>
       </Modal>
     </KeyboardAvoidingView>
   );
@@ -1745,6 +1752,9 @@ const styles = StyleSheet.create({
   imagePreviewModal: {
     flex: 1,
     backgroundColor: "rgba(0, 0, 0, 0.95)",
+  },
+  imagePreviewModalContent: {
+    flex: 1,
     justifyContent: "center",
     alignItems: "center",
     padding: 40,
@@ -1758,10 +1768,12 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0, 0, 0, 0.5)",
     borderRadius: 20,
   },
+  imagePreviewImageWrapper: {
+    width: "90%",
+    height: "80%",
+  },
   imagePreviewImage: {
     width: "100%",
     height: "100%",
-    maxWidth: "90%",
-    maxHeight: "80%",
   },
 });
