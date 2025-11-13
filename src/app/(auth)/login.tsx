@@ -24,6 +24,155 @@ const sanitizeWatIamInput = (value: string) =>
 
 type LoginStep = "welcome" | "credentials" | "code";
 
+const VantaFogBackground = () => {
+  const fogRef = React.useRef<any>(null);
+  const vantaEffectRef = React.useRef<any>(null);
+
+  React.useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") {
+      return;
+    }
+
+    const getElement = () => {
+      if (!fogRef.current) return null;
+      // In React Native Web, ref.current might be the View component instance
+      // We need to get the underlying DOM element
+      if (fogRef.current._nativeNode) {
+        return fogRef.current._nativeNode;
+      }
+      // Try finding by ID as fallback
+      return document.getElementById("vanta-bg");
+    };
+
+    const initFogBackground = () => {
+      const element = getElement();
+      if (!element) {
+        return;
+      }
+
+      // Check if scripts are already loaded
+      if (typeof (window as any).VANTA === "undefined") {
+        // Load Three.js
+        const threeScript = document.createElement("script");
+        threeScript.src =
+          "https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js";
+        threeScript.crossOrigin = "anonymous";
+        threeScript.referrerPolicy = "no-referrer";
+        document.head.appendChild(threeScript);
+
+        // Load Vanta.js after Three.js loads
+        threeScript.onload = () => {
+          const vantaScript = document.createElement("script");
+          vantaScript.src =
+            "https://cdnjs.cloudflare.com/ajax/libs/vanta/0.5.24/vanta.fog.min.js";
+          vantaScript.crossOrigin = "anonymous";
+          vantaScript.referrerPolicy = "no-referrer";
+          document.head.appendChild(vantaScript);
+
+          vantaScript.onload = () => {
+            const el = getElement();
+            if (
+              typeof (window as any).VANTA !== "undefined" &&
+              typeof (window as any).VANTA.FOG === "function" &&
+              el &&
+              !vantaEffectRef.current
+            ) {
+              vantaEffectRef.current = (window as any).VANTA.FOG({
+                el: el,
+                mouseControls: true,
+                touchControls: true,
+                gyroControls: false,
+                minHeight: 200.0,
+                minWidth: 200.0,
+                // Warm colors matching the image: cream to golden yellow (lighter)
+                highlightColor: 0xf5e4c8,
+                midtoneColor: 0xf5d88a,
+                lowlightColor: 0xfae8c8,
+                baseColor: 0xfffef8,
+                blurFactor: 0.7,
+                speed: 0.9,
+                zoom: 1.1,
+              });
+            }
+          };
+        };
+      } else if (
+        typeof (window as any).VANTA.FOG === "function" &&
+        !vantaEffectRef.current
+      ) {
+        const el = getElement();
+        if (el) {
+          // Scripts already loaded, initialize immediately
+          vantaEffectRef.current = (window as any).VANTA.FOG({
+            el: el,
+            mouseControls: true,
+            touchControls: true,
+            gyroControls: false,
+            minHeight: 200.0,
+            minWidth: 200.0,
+            highlightColor: 0xf5e4c8,
+            midtoneColor: 0xf5d88a,
+            lowlightColor: 0xfae8c8,
+            baseColor: 0xfffef8,
+            blurFactor: 0.7,
+            speed: 0.9,
+            zoom: 1.1,
+          });
+        }
+      }
+    };
+
+    // Try to initialize after a short delay to ensure DOM is ready
+    const timeoutId = setTimeout(initFogBackground, 100);
+
+    // Also try on load in case scripts load after component mounts
+    window.addEventListener("load", initFogBackground);
+
+    return () => {
+      clearTimeout(timeoutId);
+      if (vantaEffectRef.current && vantaEffectRef.current.destroy) {
+        vantaEffectRef.current.destroy();
+        vantaEffectRef.current = null;
+      }
+      window.removeEventListener("load", initFogBackground);
+    };
+  }, []);
+
+  if (Platform.OS === "web") {
+    // For web, render a View that will become a div
+    return (
+      <View
+        // @ts-ignore - web-specific ref
+        ref={fogRef}
+        style={{
+          // @ts-ignore - web-specific position value
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          zIndex: -1,
+          pointerEvents: "none",
+        }}
+        // @ts-ignore - web-specific props
+        id="vanta-bg"
+        aria-hidden="true"
+      />
+    );
+  }
+
+  // Fallback gradient for native platforms
+  return (
+    <LinearGradient
+      colors={["#FFFEF8", "#FAEFD8", "#F4DBA3"]}
+      locations={[0, 0.55, 1]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 0, y: 1 }}
+      style={StyleSheet.absoluteFill}
+    />
+  );
+};
+
 export default function LoginScreen() {
   const { width, height } = useWindowDimensions();
   const isTablet = width >= 768;
@@ -116,7 +265,7 @@ export default function LoginScreen() {
         style={[
           styles.welcomeContent,
           {
-            paddingTop: height * 0.25,
+            paddingTop: height * 0.32,
             justifyContent: "flex-start",
           },
         ]}
@@ -132,8 +281,8 @@ export default function LoginScreen() {
             styles.signInButton,
             {
               paddingVertical: isTablet ? 18 : 16,
-              paddingHorizontal: isTablet ? 48 : 40,
-              minWidth: isTablet ? 200 : 160,
+              paddingHorizontal: isTablet ? 32 : 28,
+              minWidth: isTablet ? 140 : 120,
             },
           ]}
           onPress={handleSignIn}
@@ -419,81 +568,7 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Base layer - light cream */}
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: "#FFFEF8" }]} />
-      
-      {/* Small white cloud patch - top left */}
-      <LinearGradient
-        colors={["#FFFFFF", "#FFFFFF", "transparent"]}
-        locations={[0, 0.4, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0.3, y: 0.4 }}
-      />
-      
-      {/* Large flowing golden splotch - bottom right */}
-      <LinearGradient
-        colors={["transparent", "#ebbc53", "#DCBC32", "#ebbc53"]}
-        locations={[0, 0.3, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.5, y: 0.6 }}
-        end={{ x: 1, y: 1 }}
-      />
-      
-      {/* Flowing golden splotch - top right flowing down */}
-      <LinearGradient
-        colors={["transparent", "#ebbc53", "#F5E4C8", "transparent"]}
-        locations={[0, 0.1, 0.5, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.7, y: 0 }}
-        end={{ x: 1, y: 0.6 }}
-      />
-      
-      {/* Flowing golden splotch - center left flowing right */}
-      <LinearGradient
-        colors={["transparent", "#ebbc53", "#ebbc53", "#F5E4C8", "transparent"]}
-        locations={[0, 0.1, 0.4, 0.7, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0, y: 0.3 }}
-        end={{ x: 0.5, y: 0.9 }}
-      />
-      
-      {/* Flowing golden splotch - mid section flowing diagonally */}
-      <LinearGradient
-        colors={["transparent", "#ebbc53", "#DCBC32", "transparent"]}
-        locations={[0, 0.3, 0.6, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.3, y: 0.4 }}
-        end={{ x: 0.8, y: 0.8 }}
-      />
-      
-      {/* Flowing golden splotch - bottom left flowing up */}
-      <LinearGradient
-        colors={["transparent", "#F5E4C8", "#ebbc53", "#DCBC32"]}
-        locations={[0, 0.2, 0.6, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0, y: 0.6 }}
-        end={{ x: 0.4, y: 1 }}
-      />
-      
-      {/* Small white cloud patch - center right */}
-      <LinearGradient
-        colors={["transparent", "#FFFFFF", "transparent"]}
-        locations={[0, 0.5, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.6, y: 0.2 }}
-        end={{ x: 0.9, y: 0.5 }}
-      />
-      
-      {/* Flowing golden splotch - top center flowing down */}
-      <LinearGradient
-        colors={["transparent", "#ebbc53", "#F5E4C8", "transparent"]}
-        locations={[0, 0.2, 0.6, 1]}
-        style={StyleSheet.absoluteFill}
-        start={{ x: 0.4, y: 0 }}
-        end={{ x: 0.7, y: 0.5 }}
-      />
-      
+      <VantaFogBackground />
       {/* Content */}
       <View style={styles.contentOverlay}>
         {step === "welcome" && renderWelcomeScreen()}
@@ -528,7 +603,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   welcomeText: {
-    color: "#333",
+    color: "#4a4a4a",
     fontFamily: Platform.select({
       ios: "system-ui",
       android: "sans-serif",
@@ -539,7 +614,7 @@ const styles = StyleSheet.create({
   },
   appTitle: {
     fontWeight: "700",
-    color: "#1a1a1a",
+    color: "#3a3a3a",
     fontFamily: Platform.select({
       ios: "system-ui",
       android: "sans-serif",
@@ -550,16 +625,26 @@ const styles = StyleSheet.create({
     textShadowColor: "rgba(0, 0, 0, 0.1)",
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
+    // @ts-ignore - web-specific wavy/italic effect
+    ...(Platform.OS === "web" && {
+      fontStyle: "italic",
+      transform: "perspective(500px) rotateX(10deg) skewY(-2deg)",
+      transformStyle: "preserve-3d",
+    }),
   },
   signInButton: {
-    backgroundColor: "#2a2a2a",
+    backgroundColor: "#3a3a3a",
     borderRadius: 12,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowColor: Platform.OS === "web" ? "rgba(255, 255, 255, 0.4)" : "#000",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: Platform.OS === "web" ? 0.8 : 0.3,
+    shadowRadius: Platform.OS === "web" ? 12 : 8,
+    elevation: 8,
+    // @ts-ignore - web-specific glow effect
+    ...(Platform.OS === "web" && {
+      boxShadow: "0 0 20px rgba(255, 255, 255, 0.3), 0 0 40px rgba(255, 255, 255, 0.2)",
+    }),
   },
   signInButtonText: {
     color: "#FFFFFF",
@@ -587,7 +672,7 @@ const styles = StyleSheet.create({
   },
   credentialsTitle: {
     fontWeight: "600",
-    color: "#1a1a1a",
+    color: "#3a3a3a",
     textAlign: "center",
     fontFamily: Platform.select({
       ios: "system-ui",
@@ -600,7 +685,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E0E0E0",
     borderRadius: 12,
-    color: "#1a1a1a",
+    color: "#3a3a3a",
     fontFamily: Platform.select({
       ios: "system-ui",
       android: "sans-serif",
@@ -633,15 +718,19 @@ const styles = StyleSheet.create({
     }),
   },
   button: {
-    backgroundColor: "#2a2a2a",
+    backgroundColor: "#3a3a3a",
     borderRadius: 12,
     paddingHorizontal: 24,
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowColor: Platform.OS === "web" ? "rgba(255, 255, 255, 0.4)" : "#000",
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: Platform.OS === "web" ? 0.8 : 0.3,
+    shadowRadius: Platform.OS === "web" ? 12 : 8,
+    elevation: 8,
+    // @ts-ignore - web-specific glow effect
+    ...(Platform.OS === "web" && {
+      boxShadow: "0 0 20px rgba(255, 255, 255, 0.3), 0 0 40px rgba(255, 255, 255, 0.2)",
+    }),
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -671,7 +760,7 @@ const styles = StyleSheet.create({
   },
   codeTitle: {
     fontWeight: "600",
-    color: "#1a1a1a",
+    color: "#3a3a3a",
     textAlign: "center",
     fontFamily: Platform.select({
       ios: "system-ui",
@@ -696,7 +785,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     textAlign: "center",
     fontWeight: "600",
-    color: "#1a1a1a",
+    color: "#3a3a3a",
     fontFamily: Platform.select({
       ios: "system-ui",
       android: "sans-serif",
