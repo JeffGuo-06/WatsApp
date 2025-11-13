@@ -5,22 +5,40 @@ import { courseService } from "@/services/courseService";
 import { chatService } from "@/services/chatService";
 import { router, useFocusEffect } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
+import { chatReadStorage } from "@/utils/chatReadStorage";
+
+interface CourseChatLink {
+  id: string;
+}
 
 interface UserCourse {
   id: string;
+  course_id: string;
   courses: {
     id: string;
     course_code: string;
     course_name: string | null;
     term: string;
+    course_chats?: CourseChatLink | CourseChatLink[] | null;
   };
 }
+
+const getCourseChatId = (course: UserCourse): string | undefined => {
+  const relation = course.courses?.course_chats;
+  if (!relation) return undefined;
+  if (Array.isArray(relation)) {
+    return relation[0]?.id;
+  }
+  return relation.id;
+};
 
 export default function HomeScreen() {
   const { user, profile } = useAuth();
   const [courses, setCourses] = useState<UserCourse[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [courseChatIds, setCourseChatIds] = useState<Record<string, string>>({});
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
 
   useEffect(() => {
     if (user) {
@@ -38,12 +56,100 @@ export default function HomeScreen() {
     }, [user])
   );
 
+  useEffect(() => {
+    let isActive = true;
+
+    const computeUnreadCounts = async () => {
+      if (!courses.length) {
+        if (isActive) {
+          setUnreadCounts({});
+        }
+        return;
+      }
+
+      const discoveredChatIds: Record<string, string> = {};
+      const results = await Promise.all(
+        courses.map(async (course) => {
+          try {
+            let chatId = getCourseChatId(course) ?? courseChatIds[course.courses.id];
+            if (!chatId) {
+              const chatRoom = await chatService.getCourseChatRoom(course.courses.id);
+              chatId = chatRoom?.id;
+              if (chatId) {
+                discoveredChatIds[course.courses.id] = chatId;
+              }
+            }
+
+            if (!chatId) {
+              return null;
+            }
+
+            const lastReadAt = await chatReadStorage.getLastReadAt(chatId);
+            const count = await chatService.getUnreadMessageCount(chatId, lastReadAt);
+            return { chatId, count };
+          } catch (error) {
+            console.error("Error calculating unread messages", {
+              courseId: course.courses.id,
+              error,
+            });
+            return null;
+          }
+        })
+      );
+
+      if (!isActive) {
+        return;
+      }
+
+      if (Object.keys(discoveredChatIds).length) {
+        setCourseChatIds((prev) => {
+          const next = { ...prev };
+          let changed = false;
+          Object.entries(discoveredChatIds).forEach(([courseId, chatId]) => {
+            if (next[courseId] !== chatId) {
+              next[courseId] = chatId;
+              changed = true;
+            }
+          });
+          return changed ? next : prev;
+        });
+      }
+
+      const nextCounts: Record<string, number> = {};
+      results.forEach((result) => {
+        if (result?.chatId) {
+          nextCounts[result.chatId] = result.count ?? 0;
+        }
+      });
+
+      setUnreadCounts(nextCounts);
+    };
+
+    computeUnreadCounts();
+
+    return () => {
+      isActive = false;
+    };
+  }, [courses, courseChatIds]);
+
   const loadCourses = async () => {
     try {
       console.log("[Home] Fetching courses for user", { userId: user?.id });
       const data = await courseService.getUserCourses(user!.id);
       console.log("[Home] Loaded courses successfully", { count: data.length, courses: data });
       setCourses(data);
+      setCourseChatIds((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        data.forEach((course) => {
+          const chatId = getCourseChatId(course);
+          if (chatId && next[course.courses.id] !== chatId) {
+            next[course.courses.id] = chatId;
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
     } catch (error) {
       console.error("[Home] ERROR loading courses:", error);
       // Show error details
@@ -75,6 +181,19 @@ export default function HomeScreen() {
       // Get the course chat
       const chatRoom = await chatService.getCourseChatRoom(course.courses.id);
       console.log("[Home] Navigating to course chat", { chatId: chatRoom.id });
+
+      setUnreadCounts((prev) => {
+        if (prev[chatRoom.id] === 0) {
+          return prev;
+        }
+        return { ...prev, [chatRoom.id]: 0 };
+      });
+      setCourseChatIds((prev) => {
+        if (prev[course.courses.id] === chatRoom.id) {
+          return prev;
+        }
+        return { ...prev, [course.courses.id]: chatRoom.id };
+      });
 
       router.push({
         pathname: "/course-chat",
@@ -126,23 +245,36 @@ export default function HomeScreen() {
         <FlatList
           data={courses}
           keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={styles.courseCard}
-              onPress={() => handleCoursePress(item)}
-            >
-              <View style={styles.courseHeader}>
-                <View style={styles.courseInfo}>
-                  <Text style={styles.courseCode}>{item.courses.course_code}</Text>
-                  {item.courses.course_name && (
-                    <Text style={styles.courseName}>{item.courses.course_name}</Text>
-                  )}
-                  <Text style={styles.courseTerm}>{item.courses.term}</Text>
+          renderItem={({ item }) => {
+            const chatId = getCourseChatId(item) ?? courseChatIds[item.courses.id];
+            const unreadCount = chatId ? unreadCounts[chatId] ?? 0 : 0;
+            const unreadLabel = unreadCount > 9 ? "9+" : `${unreadCount}`;
+
+            return (
+              <TouchableOpacity
+                style={styles.courseCard}
+                onPress={() => handleCoursePress(item)}
+              >
+                <View style={styles.courseHeader}>
+                  <View style={styles.courseInfo}>
+                    <Text style={styles.courseCode}>{item.courses.course_code}</Text>
+                    {item.courses.course_name && (
+                      <Text style={styles.courseName}>{item.courses.course_name}</Text>
+                    )}
+                    <Text style={styles.courseTerm}>{item.courses.term}</Text>
+                  </View>
+                  <View style={styles.courseMeta}>
+                    {unreadCount > 0 && (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadBadgeText}>{unreadLabel}</Text>
+                      </View>
+                    )}
+                    <IconSymbol name="chevron.right" size={20} color="#999" />
+                  </View>
                 </View>
-                <IconSymbol name="chevron.right" size={20} color="#999" />
-              </View>
-            </TouchableOpacity>
-          )}
+              </TouchableOpacity>
+            );
+          }}
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl
@@ -210,6 +342,26 @@ const styles = StyleSheet.create({
   },
   courseInfo: {
     flex: 1,
+  },
+  courseMeta: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 12,
+  },
+  unreadBadge: {
+    minWidth: 24,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+    backgroundColor: "#DC2626",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  unreadBadgeText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "600",
   },
   courseCode: {
     fontSize: 20,

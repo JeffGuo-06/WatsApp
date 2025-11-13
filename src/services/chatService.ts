@@ -209,6 +209,24 @@ export const chatService = {
       .subscribe();
   },
 
+  getUnreadMessageCount: async (
+    courseChatId: string,
+    lastReadAt?: string | null
+  ) => {
+    let query = supabase
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("course_chat_id", courseChatId);
+
+    if (lastReadAt) {
+      query = query.gt("created_at", lastReadAt);
+    }
+
+    const { count, error } = await query;
+    if (error) throw error;
+    return count ?? 0;
+  },
+
   // Direct messages
   getDirectMessages: async (userId: string, otherUserId: string) => {
     const { data, error } = await supabase
