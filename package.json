@@ -4,5 +4,9 @@
   "type": "module",
   "dependencies": {
     "expo": "^54.0.13"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.10",
+    "typescript": "~5.9.2"
   }
 }
