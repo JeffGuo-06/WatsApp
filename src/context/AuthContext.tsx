@@ -2,6 +2,7 @@ import React, { createContext, useState, useEffect, useContext } from "react";
 import { supabase } from "../lib/supabase";
 import { User, Session } from "@supabase/supabase-js";
 import { authService } from "../services/authService";
+import { notificationService } from "../services/notificationService";
 
 interface Profile {
   id: string;
@@ -96,6 +97,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // Track session but don't block
         authService.trackSession().catch(err => {
           console.error("[AuthContext] Session tracking failed:", err);
+        });
+
+        // Register for push notifications but don't block
+        notificationService.registerForPushNotifications(session.user.id).catch(err => {
+          console.error("[AuthContext] Push notification registration failed:", err);
         });
       } else {
         setProfile(null);

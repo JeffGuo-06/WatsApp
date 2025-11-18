@@ -29,6 +29,8 @@ import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
 import { chatReadStorage } from "@/utils/chatReadStorage";
 import { useIsFocused } from "@react-navigation/native";
+import { notificationService } from "@/services/notificationService";
+import { useAuth } from "@/context/AuthContext";
 
 interface Message {
   id: string;
@@ -111,6 +113,7 @@ export default function CourseChat() {
         ? courseChatId[0]
         : undefined;
   const isFocused = useIsFocused();
+  const { user } = useAuth();
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState("");
@@ -118,6 +121,7 @@ export default function CourseChat() {
   const [sending, setSending] = useState(false);
   const [uploadingAttachment, setUploadingAttachment] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [isMuted, setIsMuted] = useState(false);
   const [showModal, setShowModal] = useState(showJoinPrompt === "true");
   const [joining, setJoining] = useState(false);
   const [snackbar, setSnackbar] = useState({ visible: false, message: "", type: "success" as "success" | "error" | "info" });
@@ -225,6 +229,22 @@ export default function CourseChat() {
     };
   }, [initializeChat]);
 
+  // Load mute status
+  useEffect(() => {
+    const loadMuteStatus = async () => {
+      if (!user || !normalizedCourseChatId) return;
+
+      try {
+        const muted = await notificationService.isCourseMuted(user.id, normalizedCourseChatId);
+        setIsMuted(muted);
+      } catch (error) {
+        console.error('Error loading mute status:', error);
+      }
+    };
+
+    loadMuteStatus();
+  }, [user, normalizedCourseChatId]);
+
   useEffect(() => {
     const keyboardWillShow = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
@@ -314,6 +334,27 @@ export default function CourseChat() {
   const handleCancelJoin = () => {
     setShowModal(false);
     router.back();
+  };
+
+  const handleToggleMute = async () => {
+    if (!user || !normalizedCourseChatId) return;
+
+    try {
+      const newMutedState = !isMuted;
+      setIsMuted(newMutedState);
+      await notificationService.setCourseMuted(user.id, normalizedCourseChatId, newMutedState);
+
+      setSnackbar({
+        visible: true,
+        message: newMutedState ? 'Notifications muted' : 'Notifications enabled',
+        type: 'success'
+      });
+    } catch (error) {
+      console.error('Error toggling mute:', error);
+      // Revert on error
+      setIsMuted(!isMuted);
+      setSnackbar({ visible: true, message: 'Failed to update notification settings', type: 'error' });
+    }
   };
 
   const sendMessage = async (overrideContent?: string | null) => {
@@ -775,6 +816,16 @@ export default function CourseChat() {
           <Text style={styles.courseTitle}>{courseTitle}</Text>
         </View>
         <TouchableOpacity
+          style={styles.muteButton}
+          onPress={handleToggleMute}
+        >
+          <Ionicons
+            name={isMuted ? 'notifications-off' : 'notifications'}
+            size={24}
+            color="#000"
+          />
+        </TouchableOpacity>
+        <TouchableOpacity
           style={styles.menuButton}
           onPress={() => {
             if (!normalizedCourseChatId) return;
@@ -1164,6 +1215,10 @@ const styles = StyleSheet.create({
   },
   headerInfo: {
     flex: 1,
+  },
+  muteButton: {
+    marginLeft: 10,
+    padding: 4,
   },
   menuButton: {
     marginLeft: 10,

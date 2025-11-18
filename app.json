@@ -1,3 +1,42 @@
 {
-  "expo": {}
+  "expo": {
+    "name": "WatsApp",
+    "slug": "WatsApp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.watsapp.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.watsapp.mobile"
+    },
+    "plugins": [
+      "expo-notifications"
+    ],
+    "notification": {
+      "iosDisplayInForeground": true,
+      "androidMode": "default",
+      "androidCollapsedTitle": "WatsApp"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "831770f5-dede-405c-b8b6-a2b94be2c0f0"
+      }
+    }
+  }
 }

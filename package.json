@@ -3,7 +3,10 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "expo": "^54.0.13"
+    "expo": "^54.0.13",
+    "expo-constants": "^18.0.10",
+    "expo-device": "^8.0.9",
+    "expo-notifications": "^0.32.13"
   },
   "devDependencies": {
     "@types/react": "~19.1.10",

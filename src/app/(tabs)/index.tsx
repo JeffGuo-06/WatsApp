@@ -6,6 +6,8 @@ import { chatService } from "@/services/chatService";
 import { router, useFocusEffect } from "expo-router";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { chatReadStorage } from "@/utils/chatReadStorage";
+import { notificationService } from "@/services/notificationService";
+import { Ionicons } from "@expo/vector-icons";
 
 interface CourseChatLink {
   id: string;
@@ -39,6 +41,7 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [courseChatIds, setCourseChatIds] = useState<Record<string, string>>({});
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [mutedCourses, setMutedCourses] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (user) {
@@ -131,6 +134,36 @@ export default function HomeScreen() {
       isActive = false;
     };
   }, [courses, courseChatIds]);
+
+  // Load mute status for each course
+  useEffect(() => {
+    const loadMuteStatuses = async () => {
+      if (!user || !courses.length) {
+        setMutedCourses({});
+        return;
+      }
+
+      const muteStatuses: Record<string, boolean> = {};
+
+      await Promise.all(
+        courses.map(async (course) => {
+          const chatId = getCourseChatId(course) ?? courseChatIds[course.courses.id];
+          if (chatId) {
+            try {
+              const isMuted = await notificationService.isCourseMuted(user.id, chatId);
+              muteStatuses[chatId] = isMuted;
+            } catch (error) {
+              console.error('Error loading mute status for course:', course.courses.course_code, error);
+            }
+          }
+        })
+      );
+
+      setMutedCourses(muteStatuses);
+    };
+
+    loadMuteStatuses();
+  }, [user, courses, courseChatIds]);
 
   const loadCourses = async () => {
     try {
@@ -249,6 +282,7 @@ export default function HomeScreen() {
             const chatId = getCourseChatId(item) ?? courseChatIds[item.courses.id];
             const unreadCount = chatId ? unreadCounts[chatId] ?? 0 : 0;
             const unreadLabel = unreadCount > 9 ? "9+" : `${unreadCount}`;
+            const isMuted = chatId ? mutedCourses[chatId] ?? false : false;
 
             return (
               <TouchableOpacity
@@ -264,10 +298,14 @@ export default function HomeScreen() {
                     <Text style={styles.courseTerm}>{item.courses.term}</Text>
                   </View>
                   <View style={styles.courseMeta}>
-                    {unreadCount > 0 && (
-                      <View style={styles.unreadBadge}>
-                        <Text style={styles.unreadBadgeText}>{unreadLabel}</Text>
-                      </View>
+                    {isMuted ? (
+                      <Ionicons name="notifications-off" size={20} color="#999" style={{ marginRight: 8 }} />
+                    ) : (
+                      unreadCount > 0 && (
+                        <View style={styles.unreadBadge}>
+                          <Text style={styles.unreadBadgeText}>{unreadLabel}</Text>
+                        </View>
+                      )
                     )}
                     <IconSymbol name="chevron.right" size={20} color="#999" />
                   </View>

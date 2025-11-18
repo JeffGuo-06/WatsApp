@@ -4,17 +4,48 @@ import {
   DefaultTheme,
   ThemeProvider,
 } from "@react-navigation/native";
-import { Stack } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { Platform } from "react-native";
 import "react-native-reanimated";
 
 import { useColorScheme } from "@/hooks/use-color-scheme";
 import { AuthProvider } from "@/context/AuthContext";
+import { notificationService } from "@/services/notificationService";
 
 export const unstable_settings = {
   anchor: "(tabs)",
 };
+
+// Notification listener component that has access to router
+function NotificationListener() {
+  const router = useRouter();
+
+  React.useEffect(() => {
+    // Set up notification listeners
+    const removeListeners = notificationService.addNotificationListeners(
+      // Foreground notification handler
+      (notification) => {
+        console.log('[NotificationListener] Notification received in foreground:', notification);
+        // Optionally show in-app banner or toast here
+      },
+      // Notification tapped handler
+      (response) => {
+        const data = response.notification.request.content.data;
+        console.log('[NotificationListener] Notification tapped:', data);
+
+        if (data.type === 'course_message' && data.course_chat_id) {
+          // Navigate to course chat
+          router.push(`/course-chat?chatId=${data.course_chat_id}`);
+        }
+      }
+    );
+
+    return removeListeners;
+  }, [router]);
+
+  return null;
+}
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -51,12 +82,14 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+        <NotificationListener />
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen name="(auth)" options={{ headerShown: false }} />
           <Stack.Screen name="course-search" options={{ headerShown: false }} />
           <Stack.Screen name="course-chat" options={{ headerShown: false }} />
           <Stack.Screen name="course-details" options={{ headerShown: false }} />
+          <Stack.Screen name="notification-settings" options={{ headerShown: false }} />
           <Stack.Screen
             name="modal"
             options={{ presentation: "modal", title: "Modal" }}
